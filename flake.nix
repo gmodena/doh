@@ -33,6 +33,7 @@
         pkgs.dnslookup
         pkgs.mkcert
         pkgs.vscode
+        pkgs.vscode-extensions.ziglang.vscode-zig
         pkgs.claude-code
         pkgs.dig
         pkgs.certbot
