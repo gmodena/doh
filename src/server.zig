@@ -15,11 +15,14 @@ const Allocator = std.mem.Allocator;
 
 pub const Config = config.Config;
 
-const Error = error{ ServerInitFailed, SslInitFailed, CertLoadFailed, KeyLoadFailed, DnsQueryFailed, DnsQueryHasNoData, ServerListenFailed, AlpnFailed, SslHandshakeFailed, SessionFailed, DnsPoolExhausted };
+const Error = error{ ServerInitFailed, SslInitFailed, CertLoadFailed, KeyLoadFailed, DnsQueryFailed, DnsQueryHasNoData, DnsQueryIsNotValid, ServerListenFailed, AlpnFailed, SslHandshakeFailed, SessionFailed, DnsPoolExhausted };
 
 const ALPN_H2 = "h2";
 const DNS_PARAM = "dns";
 const PATH_HEADER = ":path";
+const MAX_DNS_QUERY_LEN = 4096; // RFC 8484 recommends 512 bytes for UDP compatibility
+const MIN_DNS_HEADER_LEN = 12;
+const VALID_DOH_PATH = "/dns-query";
 
 pub fn decodeUrlSafeBase64(allocator: std.mem.Allocator, encoded: []const u8) ![]u8 {
     const padding_needed = (4 - (encoded.len % 4)) % 4;
@@ -272,6 +275,14 @@ fn onHeader(
 
                     // parse DNS if query string found
                     if (pathEnd < valuelen) {
+                        // validate the path portion
+                        const path_portion = value[0 .. pathEnd - 1]; // Exclude the '?'
+
+                        if (!std.mem.eql(u8, path_portion, VALID_DOH_PATH)) {
+                            std.log.warn("Invalid DoH path {s}", .{path_portion});
+                            return c.NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE;
+                        }
+
                         // split query params
                         var params_iter = std.mem.splitSequence(u8, value[pathEnd..valuelen], "&");
 
@@ -283,6 +294,10 @@ fn onHeader(
                                 const value_part = param[eq_pos + 1 ..];
 
                                 if (std.mem.eql(u8, key, DNS_PARAM)) {
+                                    if (value_part.len > MAX_DNS_QUERY_LEN) {
+                                        std.log.warn("DNS query parameter too large: {} bytes", .{value_part.len});
+                                        return c.NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE;
+                                    }
                                     request_ctx.dns_request = value_part;
                                     break;
                                 }
@@ -367,6 +382,21 @@ fn dataReadCallback(_: ?*c.nghttp2_session, _: i32, buf: [*c]u8, length: usize, 
     }
     data_flags.* = c.NGHTTP2_DATA_FLAG_EOF;
     return 0;
+}
+
+fn isValidDnsQuery(data: []const u8) bool {
+    if (data.len < MIN_DNS_HEADER_LEN) return false;
+
+    // QR bit (bit 0 of byte 2) must be 0 for query
+    const flags = (@as(u16, data[2]) << 8) | data[3];
+    const qr_bit = (flags >> 15) & 0x01;
+    if (qr_bit != 0) return false; // Must be query, not response
+
+    // Question count is at least 1
+    const qdcount = (@as(u16, data[4]) << 8) | data[5];
+    if (qdcount == 0) return false;
+
+    return true;
 }
 
 pub const Server = struct {
@@ -582,6 +612,10 @@ pub const Server = struct {
             std.log.err("Failed to decode DNS parameter: {}", .{err});
             return err;
         };
+
+        if (!isValidDnsQuery(decoded)) {
+            return Error.DnsQueryIsNotValid;
+        }
 
         const dns_socket = self.dns_pool.acquire() orelse return Error.DnsPoolExhausted;
         defer self.dns_pool.release(dns_socket);
