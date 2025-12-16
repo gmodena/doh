@@ -9,12 +9,7 @@ pub const ServerConfig = struct {
     retry_delay_ms: u32,
 };
 
-pub const DnsConfig = struct {
-    server: []const u8,
-    port: u16,
-    pool_size: u32,
-    response_size: u32,
-};
+pub const DnsConfig = struct { server: []const u8, port: u16, pool_size: u32, response_size: u32, socket_timeout_sec: u32 };
 
 pub const SslConfig = struct {
     cert_file: []const u8,
@@ -78,12 +73,7 @@ pub const Config = struct {
                 .max_retry_attempts = @intCast(server_obj.get("max_retry_attempts").?.integer),
                 .retry_delay_ms = @intCast(server_obj.get("retry_delay_ms").?.integer),
             },
-            .dns = DnsConfig{
-                .server = dns_server,
-                .port = @intCast(dns_obj.get("port").?.integer),
-                .pool_size = @intCast(dns_obj.get("pool_size").?.integer),
-                .response_size = @intCast(dns_obj.get("response_size").?.integer),
-            },
+            .dns = DnsConfig{ .server = dns_server, .port = @intCast(dns_obj.get("port").?.integer), .pool_size = @intCast(dns_obj.get("pool_size").?.integer), .response_size = @intCast(dns_obj.get("response_size").?.integer), .timeout = @intCast(dns_obj.get("socket_timeout_sec").?.integer) },
             .ssl = SslConfig{
                 .cert_file = cert_file,
                 .key_file = key_file,
@@ -114,12 +104,7 @@ pub const Config = struct {
                 .max_retry_attempts = 3,
                 .retry_delay_ms = 100,
             },
-            .dns = DnsConfig{
-                .server = dns_server,
-                .port = 53,
-                .pool_size = 10,
-                .response_size = 4096,
-            },
+            .dns = DnsConfig{ .server = dns_server, .port = 53, .pool_size = 10, .response_size = 4096, .socket_timeout_sec = 5 },
             .ssl = SslConfig{
                 .cert_file = cert_file,
                 .key_file = key_file,
