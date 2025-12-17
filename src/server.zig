@@ -105,7 +105,7 @@ const DnsConnectionPool = struct {
                         self.state.items[i] = .available;
                     },
                     .available => {
-                        std.warn("Attempted to free a socket in state=", .{self.state.items[i]});
+                        std.warn("Attempted to free a socket in state=available", .{});
                     },
                 }
             }
