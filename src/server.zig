@@ -52,7 +52,7 @@ const DnsConnectionPool = struct {
     dns_addr: std.net.Address,
     allocator: Allocator,
 
-    fn init(allocator: Allocator, dns_addr: std.net.Address, pool_size: u32) !Self {
+    fn init(allocator: Allocator, dns_addr: std.net.Address, pool_size: u32, socket_timeout_sec: u32) !Self {
         var pool = Self{
             .sockets = try std.ArrayList(posix.socket_t).initCapacity(allocator, pool_size),
             .available = try std.ArrayList(bool).initCapacity(allocator, pool_size),
@@ -60,8 +60,11 @@ const DnsConnectionPool = struct {
             .allocator = allocator,
         };
 
+        const timeout = posix.timeval{ .sec = @intCast(socket_timeout_sec), .usec = 0 };
+
         for (0..pool_size) |_| {
             const sock = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, posix.IPPROTO.UDP);
+            try posix.setsockopt(sock, posix.SOL.SOCKET, posix.SO.RCVTIMEO, std.mem.asBytes(&timeout));
             try pool.sockets.append(sock);
             try pool.available.append(true);
         }
@@ -435,7 +438,7 @@ pub const Server = struct {
 
         const listener_socket = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.DGRAM, std.posix.IPPROTO.UDP);
         const dns_server_addr = try std.net.Address.parseIp4(server_config.dns.server, server_config.dns.port);
-        const dns_pool = try DnsConnectionPool.init(allocator, dns_server_addr, server_config.dns.pool_size);
+        const dns_pool = try DnsConnectionPool.init(allocator, dns_server_addr, server_config.dns.pool_size, server_config.dns.socket_timeout_sec);
         const listener = try https_server_addr.listen(std.net.Address.ListenOptions{});
 
         return Server{

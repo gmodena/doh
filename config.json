@@ -10,7 +10,8 @@
     "server": "1.1.1.1",
     "port": 53,
     "pool_size": 10,
-    "response_size": 4096
+    "response_size": 4096,
+    "socket_timeout_sec": 5
   },
   "ssl": {
     "cert_file": "./certs/server.crt",
