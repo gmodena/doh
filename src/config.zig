@@ -73,7 +73,7 @@ pub const Config = struct {
                 .max_retry_attempts = @intCast(server_obj.get("max_retry_attempts").?.integer),
                 .retry_delay_ms = @intCast(server_obj.get("retry_delay_ms").?.integer),
             },
-            .dns = DnsConfig{ .server = dns_server, .port = @intCast(dns_obj.get("port").?.integer), .pool_size = @intCast(dns_obj.get("pool_size").?.integer), .response_size = @intCast(dns_obj.get("response_size").?.integer), .timeout = @intCast(dns_obj.get("socket_timeout_sec").?.integer) },
+            .dns = DnsConfig{ .server = dns_server, .port = @intCast(dns_obj.get("port").?.integer), .pool_size = @intCast(dns_obj.get("pool_size").?.integer), .response_size = @intCast(dns_obj.get("response_size").?.integer), .socket_timeout_sec = @intCast(dns_obj.get("socket_timeout_sec").?.integer) },
             .ssl = SslConfig{
                 .cert_file = cert_file,
                 .key_file = key_file,
