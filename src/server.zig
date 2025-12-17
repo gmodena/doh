@@ -43,11 +43,13 @@ pub fn decodeUrlSafeBase64(allocator: std.mem.Allocator, encoded: []const u8) ![
     return decoded;
 }
 
+const SocketState = enum { available, in_use };
+
 const DnsConnectionPool = struct {
     const Self = @This();
 
     sockets: std.ArrayList(posix.socket_t),
-    available: std.ArrayList(bool),
+    state: std.ArrayList(SocketState),
     mutex: std.Thread.Mutex = .{},
     dns_addr: std.net.Address,
     allocator: Allocator,
@@ -55,7 +57,7 @@ const DnsConnectionPool = struct {
     fn init(allocator: Allocator, dns_addr: std.net.Address, pool_size: u32, socket_timeout_sec: u32) !Self {
         var pool = Self{
             .sockets = try std.ArrayList(posix.socket_t).initCapacity(allocator, pool_size),
-            .available = try std.ArrayList(bool).initCapacity(allocator, pool_size),
+            .state = try std.ArrayList(SocketState).initCapacity(allocator, pool_size),
             .dns_addr = dns_addr,
             .allocator = allocator,
         };
@@ -66,7 +68,7 @@ const DnsConnectionPool = struct {
             const sock = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, posix.IPPROTO.UDP);
             try posix.setsockopt(sock, posix.SOL.SOCKET, posix.SO.RCVTIMEO, std.mem.asBytes(&timeout));
             try pool.sockets.append(sock);
-            try pool.available.append(true);
+            try pool.state.append(SocketState.available);
         }
         return pool;
     }
@@ -76,16 +78,16 @@ const DnsConnectionPool = struct {
             posix.close(sock);
         }
         self.sockets.deinit();
-        self.available.deinit();
+        self.state.deinit();
     }
 
     fn acquire(self: *Self) ?posix.socket_t {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        for (self.available.items, 0..) |avail, i| {
-            if (avail) {
-                self.available.items[i] = false;
+        for (self.state.items, 0..) |state, i| {
+            if (state == .available) {
+                self.state.items[i] = .in_use;
                 return self.sockets.items[i];
             }
         }
@@ -98,8 +100,14 @@ const DnsConnectionPool = struct {
 
         for (self.sockets.items, 0..) |sock, i| {
             if (sock == socket) {
-                self.available.items[i] = true;
-                break;
+                switch (self.state.items[i]) {
+                    .in_use => {
+                        self.state.items[i] = .available;
+                    },
+                    .available => {
+                        std.warn("Attempted to free a socket in state=", .{self.state.items[i]});
+                    },
+                }
             }
         }
     }
