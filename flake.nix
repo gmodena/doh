@@ -45,6 +45,7 @@
               claude-code
               dig
               certbot
+              woodpecker-cli
             ];
 
             shellHook = ''

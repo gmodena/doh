@@ -1,16 +1,50 @@
-pipeline:
+variables:
+  - &ZIG_VERSION "0.14.0"
+  - &BASE_IMAGE "ubuntu:24.04"
+
+when:
+  event: [push, pull_request]
+
+matrix:
+  platform:
+    - linux/amd64
+    - linux/arm64
+
+steps:
   test:
-    image: debian:bookworm-slim
+    image: *BASE_IMAGE
+    environment:
+      ZIG_VERSION: *ZIG_VERSION
     commands:
-      # Install system dependencies
       - apt-get update
-      - apt-get install -y curl gnupg lsb-release libwolfssl-dev libnghttp2-dev build-essential
-      
-      # Add Zig repository and install
-      - curl -sS https://debian.griffo.io/EA0F721D231FDD3A0A17B9AC7808B4DD62C41256.asc | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/debian.griffo.io.gpg
-      - echo "deb https://debian.griffo.io/apt bookworm main" > /etc/apt/sources.list.d/debian.griffo.io.list
+      - apt-get install -y curl wget xz-utils libwolfssl-dev libnghttp2-dev build-essential
+      - wget https://ziglang.org/download/$${ZIG_VERSION}/zig-linux-x86_64-$${ZIG_VERSION}.tar.xz
+      - tar -xf zig-linux-x86_64-$${ZIG_VERSION}.tar.xz
+      - mv zig-linux-x86_64-$${ZIG_VERSION} /opt/zig
+      - ln -s /opt/zig/zig /usr/local/bin/zig
+      - zig build test
+
+---
+
+when:
+  event: push
+  branch: main
+
+matrix:
+  platform:
+    - linux/amd64
+    - linux/arm64
+
+steps:
+  test-after-merge:
+    image: *BASE_IMAGE
+    environment:
+      ZIG_VERSION: *ZIG_VERSION
+    commands:
       - apt-get update
-      - apt-get install -y zig
-      
-      # Build and test
+      - apt-get install -y curl wget xz-utils libwolfssl-dev libnghttp2-dev build-essential
+      - wget https://ziglang.org/download/$${ZIG_VERSION}/zig-linux-x86_64-$${ZIG_VERSION}.tar.xz
+      - tar -xf zig-linux-x86_64-$${ZIG_VERSION}.tar.xz
+      - mv zig-linux-x86_64-$${ZIG_VERSION} /opt/zig
+      - ln -s /opt/zig/zig /usr/local/bin/zig
       - zig build test
