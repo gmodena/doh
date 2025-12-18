@@ -21,7 +21,7 @@ const ALPN_H2 = "h2";
 const DNS_PARAM = "dns";
 const PATH_HEADER = ":path";
 const MAX_DNS_QUERY_LEN = 4096; // RFC 8484 recommends 512 bytes for UDP compatibility
-const MIN_DNS_HEADER_LEN = 12;
+const DNS_HEADER_LEN = 12;
 const VALID_DOH_PATH = "/dns-query";
 
 pub fn decodeUrlSafeBase64(allocator: std.mem.Allocator, encoded: []const u8) ![]u8 {
@@ -105,7 +105,7 @@ const DnsConnectionPool = struct {
                         self.state.items[i] = .available;
                     },
                     .available => {
-                        std.log.warn("Attempted to free a socket in state=available", .{});
+                        std.warn("Attempted to free a socket in state=available", .{});
                     },
                 }
             }
@@ -396,7 +396,7 @@ fn dataReadCallback(_: ?*c.nghttp2_session, _: i32, buf: [*c]u8, length: usize, 
 }
 
 fn isValidDnsQuery(data: []const u8) bool {
-    if (data.len < MIN_DNS_HEADER_LEN) return false;
+    if (data.len < DNS_HEADER_LEN) return false;
 
     // QR bit (bit 0 of byte 2) must be 0 for query
     const flags = (@as(u16, data[2]) << 8) | data[3];
@@ -644,20 +644,42 @@ pub const Server = struct {
 
         var response_buffer = try self.allocator.alloc(u8, self.config.dns.response_size);
         defer self.allocator.free(response_buffer);
+        const response_addr: std.net.Address = undefined;
         var addrlen: u32 = self.dns_server_addr.getOsSockLen();
-        const response_len = try std.posix.recvfrom(
-            dns_socket,
-            response_buffer,
-            0,
-            @ptrCast(&self.dns_server_addr),
-            &addrlen,
-        );
 
-        if (response_len <= 0) {
+        // Guard against truncation attacks.
+        const response_size = try std.posix.recvfrom(dns_socket, response_buffer, posix.MSG.TRUNC, @ptrCast(response_addr), &addrlen);
+
+        if (response_size <= 0) {
             return Error.DnsQueryFailed;
         }
 
-        try self.sendHttp2Response(request_ctx, response_buffer[0..response_len]);
+        if (response_size > self.config.dns.response_size) {
+            std.log.warn("DNS response size ({} bytes)) exceeds max ({} bytes)", .{ response_size, self.config.dns.response_size });
+            return Error.DnsQueryFailed;
+        }
+        // Validate minimum DNS response size
+        if (response_size < DNS_HEADER_LEN) {
+            std.log.err("DNS response too short: {} bytes", .{response_size});
+            return Error.DnsQueryFailed;
+        }
+
+        // Validate response came from expected DNS server
+        if (!std.net.Address.eql(response_addr, self.dns_server_addr)) {
+            std.log.warn("DNS response from unexpected address: {}, expected: {}", .{ response_addr, self.dns_server_addr });
+            return Error.DnsQueryFailed;
+        }
+
+        // Validate that we received a response, not a query.
+        // Guard against confusion attacks.
+        const flags = (@as(u16, response_buffer[2]) << 8) | response_buffer[3];
+        const qr_bit = (flags >> 15) & 0x01;
+        if (qr_bit != 1) {
+            std.log.err("Received DNS query instead of response");
+            return Error.DnsQueryFailed;
+        }
+
+        try self.sendHttp2Response(request_ctx, response_buffer[0..response_size]);
     }
 
     // Send DNS response as HTTP/2 response with appropriate headers
