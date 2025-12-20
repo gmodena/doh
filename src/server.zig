@@ -148,6 +148,13 @@ const RequestContext = struct {
 
     fn initSsl(self: *Self, ctx: *c.WOLFSSL_CTX) !void {
         self.ssl = c.wolfSSL_new(ctx) orelse return Error.SslInitFailed;
+        errdefer {
+            if (self.ssl) |ssl| {
+                c.wolfSSL_Free(ssl);
+                self.ssl = null;
+            }
+        }
+
         self.ssl_state = .handshaking;
 
         const h2_alpn = @constCast(ALPN_H2.ptr);
@@ -467,7 +474,7 @@ pub const Server = struct {
         std.posix.close(self.listener_socket);
         self.dns_pool.deinit();
         c.wolfSSL_CTX_free(self.ctx);
-        //c.wolfSSL_Cleanup();
+        c.wolfSSL_Cleanup();
     }
 
     // Accept and handle HTTPS connections
@@ -580,8 +587,12 @@ pub const Server = struct {
     }
 
     fn processHttp2Messages(self: *Server, request_ctx: *RequestContext) !void {
-        const buf = try self.allocator.alloc(u8, self.config.http.buffer_size);
-        defer self.allocator.free(buf);
+        const buf = try request_ctx.allocator.alloc(u8, self.config.http.buffer_size);
+
+        errdefer {
+            _ = c.nghttp2_session_terminate_session(request_ctx.session, c.NGHTTP2_INTERNAL_ERROR);
+            _ = c.nghttp2_session_send(request_ctx.session);
+        }
 
         while (true) {
             const bytes_read = c.wolfSSL_read(request_ctx.ssl, buf.ptr, @intCast(buf.len));
@@ -642,8 +653,8 @@ pub const Server = struct {
             return Error.DnsQueryFailed;
         }
 
-        var response_buffer = try self.allocator.alloc(u8, self.config.dns.response_size);
-        defer self.allocator.free(response_buffer);
+        var response_buffer = try request_ctx.allocator.alloc(u8, self.config.dns.response_size);
+
         const response_addr: std.net.Address = undefined;
         var addrlen: u32 = self.dns_server_addr.getOsSockLen();
 
