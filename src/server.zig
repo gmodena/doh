@@ -105,7 +105,7 @@ const DnsConnectionPool = struct {
                         self.state.items[i] = .available;
                     },
                     .available => {
-                        std.warn("Attempted to free a socket in state=available", .{});
+                        std.log.warn("Attempted to free a socket in state=available", .{});
                     },
                 }
             }
@@ -157,7 +157,9 @@ const RequestContext = struct {
 
         self.ssl_state = .handshaking;
 
-        const h2_alpn = @constCast(ALPN_H2.ptr);
+        var h2_alpn_buf: [2]u8 = "h2".*;
+        const h2_alpn = &h2_alpn_buf;
+
         if (c.wolfSSL_UseALPN(self.ssl, h2_alpn, ALPN_H2.len, c.WOLFSSL_ALPN_CONTINUE_ON_MISMATCH) != c.SSL_SUCCESS) {
             return Error.AlpnFailed;
         }
@@ -474,7 +476,7 @@ pub const Server = struct {
         std.posix.close(self.listener_socket);
         self.dns_pool.deinit();
         c.wolfSSL_CTX_free(self.ctx);
-        c.wolfSSL_Cleanup();
+        _ = c.wolfSSL_Cleanup();
     }
 
     // Accept and handle HTTPS connections
@@ -655,11 +657,11 @@ pub const Server = struct {
 
         var response_buffer = try request_ctx.allocator.alloc(u8, self.config.dns.response_size);
 
-        const response_addr: std.net.Address = undefined;
+        var response_addr: std.net.Address = undefined;
         var addrlen: u32 = self.dns_server_addr.getOsSockLen();
 
         // Guard against truncation attacks.
-        const response_size = try std.posix.recvfrom(dns_socket, response_buffer, posix.MSG.TRUNC, @ptrCast(response_addr), &addrlen);
+        const response_size = try std.posix.recvfrom(dns_socket, response_buffer, posix.MSG.TRUNC, @ptrCast(&response_addr), &addrlen);
 
         if (response_size <= 0) {
             return Error.DnsQueryFailed;
@@ -686,7 +688,7 @@ pub const Server = struct {
         const flags = (@as(u16, response_buffer[2]) << 8) | response_buffer[3];
         const qr_bit = (flags >> 15) & 0x01;
         if (qr_bit != 1) {
-            std.log.err("Received DNS query instead of response");
+            std.log.err("Received DNS query instead of response", .{});
             return Error.DnsQueryFailed;
         }
 
@@ -699,10 +701,10 @@ pub const Server = struct {
         defer request_ctx.allocator.free(cache_control_value);
 
         const headers: [4]c.nghttp2_nv = .{
-            .{ .name = @constCast(":status".ptr), .value = @constCast("200".ptr), .namelen = ":status".len, .valuelen = "200".len },
-            .{ .name = @constCast("content-type".ptr), .value = @constCast("application/dns-message".ptr), .namelen = "content-type".len, .valuelen = "application/dns-message".len },
-            .{ .name = @constCast("server".ptr), .value = @constCast("dohd".ptr), .namelen = "server".len, .valuelen = "dohd".len },
-            .{ .name = @constCast("cache-control".ptr), .value = @constCast(cache_control_value.ptr), .namelen = "cache-control".len, .valuelen = cache_control_value.len },
+            .{ .name = @constCast(":status".ptr), .value = @constCast("200".ptr), .namelen = ":status".len, .valuelen = "200".len, .flags = c.NGHTTP2_NV_FLAG_NO_COPY_NAME | c.NGHTTP2_NV_FLAG_NO_COPY_VALUE },
+            .{ .name = @constCast("content-type".ptr), .value = @constCast("application/dns-message".ptr), .namelen = "content-type".len, .valuelen = "application/dns-message".len, .flags = c.NGHTTP2_NV_FLAG_NO_COPY_NAME | c.NGHTTP2_NV_FLAG_NO_COPY_VALUE },
+            .{ .name = @constCast("server".ptr), .value = @constCast("dohd".ptr), .namelen = "server".len, .valuelen = "dohd".len, .flags = c.NGHTTP2_NV_FLAG_NO_COPY_NAME | c.NGHTTP2_NV_FLAG_NO_COPY_VALUE },
+            .{ .name = @constCast("cache-control".ptr), .value = @constCast(cache_control_value.ptr), .namelen = "cache-control".len, .valuelen = cache_control_value.len, .flags = c.NGHTTP2_NV_FLAG_NO_COPY_NAME | c.NGHTTP2_NV_FLAG_NO_COPY_VALUE },
         };
 
         var stream_data = StreamData{
