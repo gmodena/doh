@@ -5,7 +5,7 @@ pub const ServerConfig = struct {
     listen_port: u16,
     max_concurrent_connections: u32,
     connection_timeout_sec: u32,
-    max_retry_attempts: u32,
+    max_retry_attempts: u8,
     retry_delay_ms: u32,
 };
 
@@ -15,7 +15,7 @@ pub const SslConfig = struct {
     cert_file: []const u8,
     key_file: []const u8,
     handshake_timeout_ms: u32,
-    handshake_max_attempts: u32,
+    handshake_max_attempts: u8,
 };
 
 pub const HttpConfig = struct {

@@ -3,6 +3,7 @@ const net = std.net;
 const http = std.http;
 const posix = std.posix;
 const config = @import("config.zig");
+const errorz = @import("error");
 const c = @cImport({
     @cDefine("XSTAT_TYPE", "struct stat");
     @cInclude("wolfssl/options.h");
@@ -15,7 +16,7 @@ const Allocator = std.mem.Allocator;
 
 pub const Config = config.Config;
 
-const Error = error{ ServerInitFailed, SslInitFailed, CertLoadFailed, KeyLoadFailed, DnsQueryFailed, DnsQueryHasNoData, DnsQueryIsNotValid, ServerListenFailed, AlpnFailed, SslHandshakeFailed, SessionFailed, DnsPoolExhausted };
+const Error = errorz.Error;
 
 const ALPN_H2 = "h2";
 const DNS_PARAM = "dns";
@@ -171,44 +172,29 @@ const RequestContext = struct {
     }
 
     fn performHandshake(self: *Self) !void {
-        const max_attempts = self.server.config.ssl.handshake_max_attempts;
-        const start_time = std.time.milliTimestamp();
-        const timeout_ms = self.server.config.ssl.handshake_timeout_ms;
-
-        while (self.ssl_state == .handshaking and self.handshake_attempts < max_attempts) {
-            if (std.time.milliTimestamp() - start_time > timeout_ms) {
-                self.ssl_state = .error_state;
-                std.log.warn("SSL handshake timeout ({} ms) from {any}", .{ timeout_ms, self.connection.address });
-                return Error.SslHandshakeFailed;
+        const Inner = struct {
+            fn doSslAccept(s: *Self) !void {
+                const result = c.wolfSSL_accept(s.ssl);
+                if (result == c.SSL_SUCCESS) return;
+                s.ssl_error = c.wolfSSL_get_error(s.ssl, result);
+                return error.SslHandshakeFailed;
             }
+        };
 
-            const result = c.wolfSSL_accept(self.ssl);
-            if (result == c.SSL_SUCCESS) {
-                self.ssl_state = .connected;
-                std.log.debug("SSL handshake successful for {any} after {} attempts", .{ self.connection.address, self.handshake_attempts + 1 });
-                return;
-            }
+        const policy = errorz.RetryPolicy{
+            .max_tries = self.server.config.ssl.handshake_max_attempts,
+            .delay_ms = 10,
+            .timeout_ms = self.server.config.ssl.handshake_timeout_ms,
+        };
 
-            const ssl_error = c.wolfSSL_get_error(self.ssl, result);
-            switch (ssl_error) {
-                c.SSL_ERROR_WANT_READ, c.SSL_ERROR_WANT_WRITE => {
-                    std.time.sleep(10 * std.time.ns_per_ms);
-                    self.handshake_attempts += 1;
-                },
-                else => {
-                    self.ssl_state = .error_state;
-                    self.ssl_error = ssl_error;
-                    std.log.warn("SSL handshake failed after {} attempts: SSL error {} from {any}", .{ self.handshake_attempts + 1, ssl_error, self.connection.address });
-                    return Error.SslHandshakeFailed;
-                },
-            }
-        }
-
-        if (self.handshake_attempts >= max_attempts) {
+        errorz.retry(Inner.doSslAccept, .{self}, policy) catch |err| {
             self.ssl_state = .error_state;
-            std.log.warn("SSL handshake exceeded max attempts ({}) from {any}", .{ max_attempts, self.connection.address });
-            return Error.SslHandshakeFailed;
-        }
+            std.log.warn("SSL handshake failed from {any}: {}", .{ self.connection.address, err });
+            return err;
+        };
+
+        self.ssl_state = .connected;
+        std.log.debug("SSL handshake successful for {any}", .{self.connection.address});
     }
 
     fn initHttp2Session(self: *Self, callbacks: ?*c.nghttp2_session_callbacks) !void {
@@ -522,39 +508,17 @@ pub const Server = struct {
             return;
         };
 
-        const max_tries = self.config.server.max_retry_attempts;
-        var attempt: u8 = 0;
+        const retry_policy = errorz.RetryPolicy{
+            .max_tries = self.config.server.max_retry_attempts,
+            .delay_ms = 3,
+            .timeout_ms = 100,
+        };
 
-        while (attempt < max_tries) {
-            attempt += 1;
+        errorz.retry(Server.handleDohRequest, .{ self, connection }, retry_policy) catch |err| {
+            std.log.err("Connection {any} failed with {}", .{ connection.address, err });
+        };
 
-            self.handleDohRequest(connection) catch |err| {
-                const should_retry = switch (err) {
-                    // transient errors
-                    Error.DnsQueryFailed => true,
-                    Error.SslHandshakeFailed => true,
-
-                    // permanent errors
-                    Error.AlpnFailed => false,
-                    Error.SslInitFailed => false,
-                    //                    Error.OutOfMemory => false,
-
-                    // other errors
-                    else => attempt < 2,
-                };
-
-                if (should_retry and attempt < max_tries) {
-                    std.log.debug("Retrying connection {any} in {}ms (attempt {}/{}): {}", .{ connection.address, self.config.server.retry_delay_ms, attempt, max_tries, err });
-                    std.time.sleep(self.config.server.retry_delay_ms * std.time.ns_per_ms);
-                    continue;
-                } else {
-                    std.log.warn("Connection {any} failed permanently after {} attempts: {}", .{ connection.address, attempt, err });
-                    return;
-                }
-            };
-
-            std.log.info("Connection {any} completed successfully", .{connection.address});
-        }
+        std.log.info("Connection {any} completed successfully", .{connection.address});
     }
 
     // Handle single client connection: SSL handshake, HTTP/2 setup, DNS processing

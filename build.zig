@@ -36,6 +36,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const error_module = b.addModule("error", .{
+        .root_source_file = b.path("src/error.zig"),
+    });
+    exe.root_module.addImport("error", error_module);
+
     //exe.addLibraryPath(.{ .cwd_relative = "/nix/store/kvaq8j1nww7yq8d1vjgmsy2jqk33yjsp-wolfssl-all-5.7.2-dev/lib" });
     //exe.addLibraryPath(.{ .cwd_relative = "/nix/store/68qv46bl2ww8c3bprmk68qwg2sv3yksi-c-ares-1.27.0/lib/" });
     exe.linkSystemLibrary("c");
@@ -84,6 +89,7 @@ pub fn build(b: *std.Build) void {
     lib_unit_tests.linkSystemLibrary("c");
     lib_unit_tests.linkSystemLibrary("wolfssl");
     lib_unit_tests.linkSystemLibrary("nghttp2");
+    lib_unit_tests.root_module.addImport("error", error_module);
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
@@ -91,6 +97,7 @@ pub fn build(b: *std.Build) void {
     const server_module = b.addModule("server", .{
         .root_source_file = b.path("src/server.zig"),
     });
+    server_module.addImport("error", error_module);
 
     // Add comprehensive test suite
     const doh_tests = b.addTest(.{
@@ -101,6 +108,7 @@ pub fn build(b: *std.Build) void {
 
     // Add the server module to tests
     doh_tests.root_module.addImport("server", server_module);
+    doh_tests.root_module.addImport("error", error_module);
 
     // Link libraries for DoH tests
     doh_tests.linkSystemLibrary("c");
@@ -157,4 +165,15 @@ pub fn build(b: *std.Build) void {
 
     const mock_test_step = b.step("test-mock", "Run mock tests only");
     mock_test_step.dependOn(&run_mock_tests.step);
+
+    const retry_tests = b.addTest(.{
+        .root_source_file = b.path("tests/retry_tests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    retry_tests.root_module.addImport("error", error_module);
+    const run_retry_tests = b.addRunArtifact(retry_tests);
+
+    const retry_test_step = b.step("test-retry", "Run retry tests only");
+    retry_test_step.dependOn(&run_retry_tests.step);
 }
