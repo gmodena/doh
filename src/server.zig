@@ -28,7 +28,15 @@ const VALID_DOH_PATH = "/dns-query";
 pub fn decodeUrlSafeBase64(allocator: std.mem.Allocator, encoded: []const u8) ![]u8 {
     const padding_needed = (4 - (encoded.len % 4)) % 4;
 
-    var padded_input = try allocator.alloc(u8, encoded.len + padding_needed);
+    // This is unlikely to overflow, but it could happen if
+    // `encoded.len` is close to `usize` maximum.
+    const padding_len, const overflowed = @addWithOverflow(encoded.len, padding_needed);
+    if (overflowed != 0) {
+        return error.OutOfMemory;
+    }
+
+    var padded_input = try allocator.alloc(u8, padding_len);
+
     defer allocator.free(padded_input);
 
     @memcpy(padded_input[0..encoded.len], encoded);
@@ -664,6 +672,9 @@ pub const Server = struct {
         const cache_control_value = try std.fmt.allocPrint(request_ctx.allocator, "max-age={}", .{self.config.http.cache_control_max_age});
         defer request_ctx.allocator.free(cache_control_value);
 
+        // @constCast instruces a safety issue.
+        // hghttp2 expects the buffers to mutable, however the library should not modify
+        // header strings. Err on the side of performance for now, and cast away.
         const headers: [4]c.nghttp2_nv = .{
             .{ .name = @constCast(":status".ptr), .value = @constCast("200".ptr), .namelen = ":status".len, .valuelen = "200".len, .flags = c.NGHTTP2_NV_FLAG_NO_COPY_NAME | c.NGHTTP2_NV_FLAG_NO_COPY_VALUE },
             .{ .name = @constCast("content-type".ptr), .value = @constCast("application/dns-message".ptr), .namelen = "content-type".len, .valuelen = "application/dns-message".len, .flags = c.NGHTTP2_NV_FLAG_NO_COPY_NAME | c.NGHTTP2_NV_FLAG_NO_COPY_VALUE },
