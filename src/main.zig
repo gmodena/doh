@@ -18,6 +18,10 @@ pub fn main() !void {
     var doh_server = try Server.init(allocator, server_config);
     defer doh_server.deinit();
 
-    std.log.info("DoH server starting on port {d}", .{server_config.server.listen_port});
+    std.log.info("DoH server starting at {s}:{d}", .{
+        server_config.server.listen_address,
+        server_config.server.listen_port,
+    });
+
     try doh_server.accept();
 }

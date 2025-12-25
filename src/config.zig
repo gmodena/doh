@@ -2,6 +2,7 @@ const std = @import("std");
 const json = std.json;
 
 pub const ServerConfig = struct {
+    listen_address: []const u8,
     listen_port: u16,
     max_concurrent_connections: u32,
     connection_timeout_sec: u32,
@@ -67,6 +68,7 @@ pub const Config = struct {
 
         return Self{
             .server = ServerConfig{
+                .listen_address = try allocator.dupe(u8, server_obj.get("listen_address").?.string),
                 .listen_port = @intCast(server_obj.get("listen_port").?.integer),
                 .max_concurrent_connections = @intCast(server_obj.get("max_concurrent_connections").?.integer),
                 .connection_timeout_sec = @intCast(server_obj.get("connection_timeout_sec").?.integer),
@@ -98,6 +100,7 @@ pub const Config = struct {
 
         return Self{
             .server = ServerConfig{
+                .listen_address = "127.0.0.1",
                 .listen_port = 8443,
                 .max_concurrent_connections = 100,
                 .connection_timeout_sec = 30,
