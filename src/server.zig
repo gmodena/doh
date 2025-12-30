@@ -219,6 +219,8 @@ pub const Server = struct {
             return Error.DnsQueryIsNotValid;
         }
 
+        const query_transaction_id = (@as(u16, decoded[0]) << 8) | decoded[1];
+
         const dns_socket = self.dns_pool.acquire() orelse return Error.DnsPoolExhausted;
         defer self.dns_pool.release(dns_socket);
 
@@ -246,7 +248,7 @@ pub const Server = struct {
         }
 
         if (response_size > self.config.dns.response_size) {
-            std.log.warn("DNS response size ({} bytes)) exceeds max ({} bytes)", .{ response_size, self.config.dns.response_size });
+            std.log.err("DNS response size ({} bytes)) exceeds max ({} bytes)", .{ response_size, self.config.dns.response_size });
             return Error.DnsQueryFailed;
         }
         // Validate minimum DNS response size
@@ -257,7 +259,7 @@ pub const Server = struct {
 
         // Validate response came from expected DNS server
         if (!std.net.Address.eql(response_addr, self.dns_server_addr)) {
-            std.log.warn("DNS response from unexpected address: {}, expected: {}", .{ response_addr, self.dns_server_addr });
+            std.log.err("DNS response from unexpected address: {}, expected: {}", .{ response_addr, self.dns_server_addr });
             return Error.DnsQueryFailed;
         }
 
@@ -267,6 +269,14 @@ pub const Server = struct {
         const qr_bit = (flags >> 15) & 0x01;
         if (qr_bit != 1) {
             std.log.err("Received DNS query instead of response", .{});
+            return Error.DnsQueryFailed;
+        }
+
+        // Validate that transaction ID from response matches the query one.
+        const response_transaction_id = (@as(u16, response_buffer[0]) << 8) | response_buffer[1];
+        if (response_transaction_id != query_transaction_id) {
+            std.log.err("DNS transaction ID mismatch: query={}, response={}", .{ query_transaction_id, response_transaction_id });
+
             return Error.DnsQueryFailed;
         }
 
