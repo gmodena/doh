@@ -31,8 +31,8 @@ pub const ConnectionPool = struct {
         for (0..pool_size) |_| {
             const sock = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, posix.IPPROTO.UDP);
             try posix.setsockopt(sock, posix.SOL.SOCKET, posix.SO.RCVTIMEO, std.mem.asBytes(&timeout));
-            try pool.sockets.append(sock);
-            try pool.state.append(SocketState.available);
+            try pool.sockets.append(pool.allocator, sock);
+            try pool.state.append(pool.allocator, SocketState.available);
         }
         return pool;
     }
@@ -41,8 +41,8 @@ pub const ConnectionPool = struct {
         for (self.sockets.items) |sock| {
             posix.close(sock);
         }
-        self.sockets.deinit();
-        self.state.deinit();
+        self.sockets.deinit(self.allocator);
+        self.state.deinit(self.allocator);
     }
 
     pub fn acquire(self: *Self) ?posix.socket_t {

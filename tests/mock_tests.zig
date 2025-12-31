@@ -221,17 +221,17 @@ test "Memory allocation under load" {
     const allocator = gpa.allocator();
 
     const num_requests = 50;
-    var allocations = std.ArrayList([]u8).init(allocator);
+    var allocations: std.ArrayList([]u8) = .empty;
     defer {
         for (allocations.items) |allocation| {
             testing.allocator.free(allocation);
         }
-        allocations.deinit();
+        allocations.deinit(allocator);
     }
 
     for (0..num_requests) |i| {
         const response_data = try std.fmt.allocPrint(testing.allocator, "response_{d}", .{i});
-        try allocations.append(response_data);
+        try allocations.append(allocator, response_data);
 
         const response_copy = try allocator.dupe(u8, response_data);
         defer allocator.free(response_copy);
