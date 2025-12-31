@@ -16,37 +16,37 @@ const TestClient = struct {
     }
 
     pub fn createDnsQuery(self: Self) ![]u8 {
-        var query = std.ArrayList(u8).init(self.allocator);
-        defer query.deinit();
+        var query: std.ArrayList(u8) = .empty;
+        defer query.deinit(self.allocator);
 
         // DNS header (12 bytes)
         // Transaction ID (2 bytes)
-        try query.appendSlice(&[_]u8{ 0x12, 0x34 });
+        try query.appendSlice(self.allocator, &[_]u8{ 0x12, 0x34 });
         // Flags (2 bytes) - standard query
-        try query.appendSlice(&[_]u8{ 0x01, 0x00 });
+        try query.appendSlice(self.allocator, &[_]u8{ 0x01, 0x00 });
         // Questions (2 bytes)
-        try query.appendSlice(&[_]u8{ 0x00, 0x01 });
+        try query.appendSlice(self.allocator, &[_]u8{ 0x00, 0x01 });
         // Answer RRs (2 bytes)
-        try query.appendSlice(&[_]u8{ 0x00, 0x00 });
+        try query.appendSlice(self.allocator, &[_]u8{ 0x00, 0x00 });
         // Authority RRs (2 bytes)
-        try query.appendSlice(&[_]u8{ 0x00, 0x00 });
+        try query.appendSlice(self.allocator, &[_]u8{ 0x00, 0x00 });
         // Additional RRs (2 bytes)
-        try query.appendSlice(&[_]u8{ 0x00, 0x00 });
+        try query.appendSlice(self.allocator, &[_]u8{ 0x00, 0x00 });
 
         // Question section (simplified)
         // Domain name (encoded)
-        try query.append(7); // Length of "example"
-        try query.appendSlice("example");
-        try query.append(3); // Length of "com"
-        try query.appendSlice("com");
-        try query.append(0); // End of name
+        try query.append(self.allocator, 7); // Length of "example"
+        try query.appendSlice(self.allocator, "example");
+        try query.append(self.allocator, 3); // Length of "com"
+        try query.appendSlice(self.allocator, "com");
+        try query.append(self.allocator, 0); // End of name
 
         // Query type (A record = 1)
-        try query.appendSlice(&[_]u8{ 0x00, 0x01 });
+        try query.appendSlice(self.allocator, &[_]u8{ 0x00, 0x01 });
         // Query class (IN = 1)
-        try query.appendSlice(&[_]u8{ 0x00, 0x01 });
+        try query.appendSlice(self.allocator, &[_]u8{ 0x00, 0x01 });
 
-        return query.toOwnedSlice();
+        return query.toOwnedSlice(self.allocator);
     }
 
     pub fn encodeDnsQuery(self: Self, dns_query: []const u8) ![]u8 {
@@ -143,17 +143,17 @@ test "Memory allocation patterns" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var allocations = std.ArrayList([]u8).init(testing.allocator);
+    var allocations: std.ArrayList([]u8) = .empty;
     defer {
         for (allocations.items) |allocation| {
             testing.allocator.free(allocation);
         }
-        allocations.deinit();
+        allocations.deinit(testing.allocator);
     }
 
     for (0..10) |i| {
         const test_data = try std.fmt.allocPrint(testing.allocator, "test_query_{d}", .{i});
-        try allocations.append(test_data);
+        try allocations.append(testing.allocator, test_data);
 
         const encoded = try server.decodeUrlSafeBase64(allocator, "dGVzdA"); // "test"
         defer allocator.free(encoded);

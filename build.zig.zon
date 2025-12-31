@@ -1,7 +1,7 @@
 .{
     .name = .doh,
     .version = "0.0.1",
-    .minimum_zig_version = "0.14.0",
+    .minimum_zig_version = "0.15.0",
     .fingerprint = 0x119324eca122e0b7,
     .paths = .{ "src", "build.zig", "build.zig.zon" },
 }

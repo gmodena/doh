@@ -5,13 +5,7 @@ const config = @import("config.zig");
 const errorz = @import("error");
 const http = @import("http.zig");
 const dns = @import("dns.zig");
-const c = @cImport({
-    @cDefine("XSTAT_TYPE", "struct stat");
-    @cInclude("wolfssl/options.h");
-    @cInclude("wolfssl/wolfcrypt/settings.h");
-    @cInclude("wolfssl/ssl.h");
-    @cInclude("nghttp2/nghttp2.h");
-});
+const c = @import("cimports.zig").c;
 
 const Allocator = std.mem.Allocator;
 
@@ -259,7 +253,7 @@ pub const Server = struct {
 
         // Validate response came from expected DNS server
         if (!std.net.Address.eql(response_addr, self.dns_server_addr)) {
-            std.log.err("DNS response from unexpected address: {}, expected: {}", .{ response_addr, self.dns_server_addr });
+            std.log.err("DNS response from unexpected address: {any}, expected: {any}", .{ response_addr, self.dns_server_addr });
             return Error.DnsQueryFailed;
         }
 

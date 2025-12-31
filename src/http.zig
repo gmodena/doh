@@ -4,13 +4,7 @@ const posix = std.posix;
 const config = @import("config.zig");
 const errorz = @import("error");
 const dns = @import("dns.zig");
-const c = @cImport({
-    @cDefine("XSTAT_TYPE", "struct stat");
-    @cInclude("wolfssl/options.h");
-    @cInclude("wolfssl/wolfcrypt/settings.h");
-    @cInclude("wolfssl/ssl.h");
-    @cInclude("nghttp2/nghttp2.h");
-});
+const c = @import("cimports.zig").c;
 
 const Allocator = std.mem.Allocator;
 const Error = errorz.Error;
@@ -182,7 +176,7 @@ pub const RequestContext = struct {
 };
 
 // nghttp2 callback: frame received
-pub fn onFrameRecv(_: ?*c.nghttp2_session, frame: [*c]const c.nghttp2_frame, client_data: ?*anyopaque) callconv(.C) c_int {
+pub fn onFrameRecv(_: ?*c.nghttp2_session, frame: [*c]const c.nghttp2_frame, client_data: ?*anyopaque) callconv(.c) c_int {
     if (client_data) |data| {
         const request_ctx: *RequestContext = @ptrCast(@alignCast(data));
         request_ctx.has_frame = true;
@@ -207,7 +201,7 @@ pub fn onHeader(
     valuelen: usize,
     _: u8,
     client_data: ?*anyopaque,
-) callconv(.C) c_int {
+) callconv(.c) c_int {
     const PATH: []const u8 = PATH_HEADER;
 
     if (client_data) |data| {
@@ -289,7 +283,7 @@ pub fn onHeader(
 }
 
 // nghttp2 callback: send data over SSL
-pub fn onSend(session: ?*c.struct_nghttp2_session, response: [*c]const u8, length: usize, _: c_int, client_data: ?*anyopaque) callconv(.C) isize {
+pub fn onSend(session: ?*c.struct_nghttp2_session, response: [*c]const u8, length: usize, _: c_int, client_data: ?*anyopaque) callconv(.c) isize {
     if (client_data) |data| {
         const request_ctx: *RequestContext = @ptrCast(@alignCast(data));
 
@@ -312,7 +306,7 @@ pub fn onSend(session: ?*c.struct_nghttp2_session, response: [*c]const u8, lengt
 }
 
 // nghttp2 callback: stream closed
-pub fn onStreamClose(_: ?*c.nghttp2_session, stream_id: i32, _: u32, client_data: ?*anyopaque) callconv(.C) c_int {
+pub fn onStreamClose(_: ?*c.nghttp2_session, stream_id: i32, _: u32, client_data: ?*anyopaque) callconv(.c) c_int {
     _ = stream_id;
     _ = client_data;
     // cleanup handled by session termination
@@ -328,7 +322,7 @@ pub fn checkError(rc: c_int) !void {
 pub const StreamData = struct { stream_id: i32, response_buffer: []const u8, response_len: usize, response_pos: usize = 0 };
 
 // nghttp2 callback: stream response data
-pub fn dataReadCallback(_: ?*c.nghttp2_session, _: i32, buf: [*c]u8, length: usize, data_flags: [*c]u32, source: [*c]c.nghttp2_data_source, _: ?*anyopaque) callconv(.C) isize {
+pub fn dataReadCallback(_: ?*c.nghttp2_session, _: i32, buf: [*c]u8, length: usize, data_flags: [*c]u32, source: [*c]c.nghttp2_data_source, _: ?*anyopaque) callconv(.c) isize {
     if (source.*.ptr) |data| {
         const stream_data: *StreamData = @ptrCast(@alignCast(data));
 

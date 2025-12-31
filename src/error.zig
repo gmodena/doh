@@ -58,7 +58,7 @@ fn retryCall(comptime Context: type, context: Context, config: RetryPolicy) !voi
 
             if (should_retry and attempt < config.max_tries) {
                 if (config.delay_ms) |delay| {
-                    std.time.sleep(@as(u64, delay) * std.time.ns_per_ms);
+                    std.Thread.sleep(@as(u64, delay) * std.time.ns_per_ms);
                 }
                 continue;
             }
