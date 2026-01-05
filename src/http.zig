@@ -161,8 +161,8 @@ pub const RequestContext = struct {
         try checkError(c.nghttp2_session_server_new(&self.session, callbacks, self));
 
         const settings: [2]c.nghttp2_settings_entry = .{
-            .{ .settings_id = c.NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS, .value = server_config.http2.max_concurrent_streams },
-            .{ .settings_id = c.NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE, .value = server_config.http2.initial_window_size },
+            .{ .settings_id = c.NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS, .value = server_config.http.max_concurrent_streams },
+            .{ .settings_id = c.NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE, .value = server_config.http.initial_window_size },
         };
         _ = c.nghttp2_submit_settings(self.session, c.NGHTTP2_FLAG_NONE, &settings, settings.len);
     }

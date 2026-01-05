@@ -1,16 +1,34 @@
 const std = @import("std");
 const json = std.json;
 
+pub const ConfigError = error{
+    MissingServerConfig,
+    MissingDnsConfig,
+    MissingSslConfig,
+    MissingListenAddress,
+    MissingListenPort,
+    MissingDnsServer,
+    MissingDnsPort,
+    MissingCertFile,
+    MissingKeyFile,
+};
+
 pub const ServerConfig = struct {
     listen_address: []const u8,
     listen_port: u16,
     max_concurrent_connections: u32,
-    connection_timeout_sec: u32,
+    connection_timeout_ms: u32,
     max_retry_attempts: u8,
     retry_delay_ms: u32,
 };
 
-pub const DnsConfig = struct { server: []const u8, port: u16, pool_size: u32, response_size: u32, socket_timeout_sec: u32 };
+pub const DnsConfig = struct {
+    server: []const u8,
+    port: u16,
+    pool_size: u32,
+    response_size: u32,
+    socket_timeout_ms: u32,
+};
 
 pub const SslConfig = struct {
     cert_file: []const u8,
@@ -22,19 +40,24 @@ pub const SslConfig = struct {
 pub const HttpConfig = struct {
     buffer_size: u32,
     cache_control_max_age: u32,
-};
-
-pub const Http2Config = struct {
     max_concurrent_streams: u32,
     initial_window_size: u32,
 };
+
+fn getIntOrDefault(comptime T: type, obj: ?json.ObjectMap, key: []const u8, default: T) T {
+    const map = obj orelse return default;
+    const val = map.get(key) orelse return default;
+    return switch (val) {
+        .integer => |i| @intCast(i),
+        else => default,
+    };
+}
 
 pub const Config = struct {
     server: ServerConfig,
     dns: DnsConfig,
     ssl: SslConfig,
     http: HttpConfig,
-    http2: Http2Config,
 
     const Self = @This();
 
@@ -56,69 +79,83 @@ pub const Config = struct {
 
         const root = parsed.value.object;
 
-        const server_obj = root.get("server").?.object;
-        const dns_obj = root.get("dns").?.object;
-        const ssl_obj = root.get("ssl").?.object;
-        const http_obj = root.get("http").?.object;
-        const http2_obj = root.get("http2").?.object;
+        // Required sections
+        const server_obj = root.get("server") orelse return error.MissingServerConfig;
+        const dns_obj = root.get("dns") orelse return error.MissingDnsConfig;
+        const ssl_obj = root.get("ssl") orelse return error.MissingSslConfig;
 
-        const cert_file = try allocator.dupe(u8, ssl_obj.get("cert_file").?.string);
-        const key_file = try allocator.dupe(u8, ssl_obj.get("key_file").?.string);
-        const dns_server = try allocator.dupe(u8, dns_obj.get("server").?.string);
+        const server_map = server_obj.object;
+        const dns_map = dns_obj.object;
+        const ssl_map = ssl_obj.object;
+
+        // Optional section
+        const http_map: ?json.ObjectMap = if (root.get("http")) |h| h.object else null;
+
+        // Required fields - will fail if missing
+        const listen_address = server_map.get("listen_address") orelse return error.MissingListenAddress;
+        const listen_port = server_map.get("listen_port") orelse return error.MissingListenPort;
+        const dns_server_val = dns_map.get("server") orelse return error.MissingDnsServer;
+        const dns_port = dns_map.get("port") orelse return error.MissingDnsPort;
+        const cert_file_val = ssl_map.get("cert_file") orelse return error.MissingCertFile;
+        const key_file_val = ssl_map.get("key_file") orelse return error.MissingKeyFile;
 
         return Self{
             .server = ServerConfig{
-                .listen_address = try allocator.dupe(u8, server_obj.get("listen_address").?.string),
-                .listen_port = @intCast(server_obj.get("listen_port").?.integer),
-                .max_concurrent_connections = @intCast(server_obj.get("max_concurrent_connections").?.integer),
-                .connection_timeout_sec = @intCast(server_obj.get("connection_timeout_sec").?.integer),
-                .max_retry_attempts = @intCast(server_obj.get("max_retry_attempts").?.integer),
-                .retry_delay_ms = @intCast(server_obj.get("retry_delay_ms").?.integer),
+                .listen_address = try allocator.dupe(u8, listen_address.string),
+                .listen_port = @intCast(listen_port.integer),
+                .max_concurrent_connections = getIntOrDefault(u32, server_map, "max_concurrent_connections", 100),
+                .connection_timeout_ms = getIntOrDefault(u32, server_map, "connection_timeout_ms", 30000),
+                .max_retry_attempts = getIntOrDefault(u8, server_map, "max_retry_attempts", 3),
+                .retry_delay_ms = getIntOrDefault(u32, server_map, "retry_delay_ms", 100),
             },
-            .dns = DnsConfig{ .server = dns_server, .port = @intCast(dns_obj.get("port").?.integer), .pool_size = @intCast(dns_obj.get("pool_size").?.integer), .response_size = @intCast(dns_obj.get("response_size").?.integer), .socket_timeout_sec = @intCast(dns_obj.get("socket_timeout_sec").?.integer) },
+            .dns = DnsConfig{
+                .server = try allocator.dupe(u8, dns_server_val.string),
+                .port = @intCast(dns_port.integer),
+                .pool_size = getIntOrDefault(u32, dns_map, "pool_size", 10),
+                .response_size = getIntOrDefault(u32, dns_map, "response_size", 4096),
+                .socket_timeout_ms = getIntOrDefault(u32, dns_map, "socket_timeout_ms", 5000),
+            },
             .ssl = SslConfig{
-                .cert_file = cert_file,
-                .key_file = key_file,
-                .handshake_timeout_ms = @intCast(ssl_obj.get("handshake_timeout_ms").?.integer),
-                .handshake_max_attempts = @intCast(ssl_obj.get("handshake_max_attempts").?.integer),
+                .cert_file = try allocator.dupe(u8, cert_file_val.string),
+                .key_file = try allocator.dupe(u8, key_file_val.string),
+                .handshake_timeout_ms = getIntOrDefault(u32, ssl_map, "handshake_timeout_ms", 5000),
+                .handshake_max_attempts = getIntOrDefault(u8, ssl_map, "handshake_max_attempts", 5),
             },
             .http = HttpConfig{
-                .buffer_size = @intCast(http_obj.get("buffer_size").?.integer),
-                .cache_control_max_age = @intCast(http_obj.get("cache_control_max_age").?.integer),
-            },
-            .http2 = Http2Config{
-                .max_concurrent_streams = @intCast(http2_obj.get("max_concurrent_streams").?.integer),
-                .initial_window_size = @intCast(http2_obj.get("initial_window_size").?.integer),
+                .buffer_size = getIntOrDefault(u32, http_map, "buffer_size", 1460),
+                .cache_control_max_age = getIntOrDefault(u32, http_map, "cache_control_max_age", 300),
+                .max_concurrent_streams = getIntOrDefault(u32, http_map, "max_concurrent_streams", 100),
+                .initial_window_size = getIntOrDefault(u32, http_map, "initial_window_size", 65536),
             },
         };
     }
 
     pub fn defaults(allocator: std.mem.Allocator) !Self {
-        const cert_file = try allocator.dupe(u8, "./certs/server.crt");
-        const key_file = try allocator.dupe(u8, "./certs/server.key");
-        const dns_server = try allocator.dupe(u8, "8.8.8.8");
-
         return Self{
             .server = ServerConfig{
-                .listen_address = "127.0.0.1",
+                .listen_address = try allocator.dupe(u8, "127.0.0.1"),
                 .listen_port = 8443,
                 .max_concurrent_connections = 100,
-                .connection_timeout_sec = 30,
+                .connection_timeout_ms = 30000,
                 .max_retry_attempts = 3,
                 .retry_delay_ms = 100,
             },
-            .dns = DnsConfig{ .server = dns_server, .port = 53, .pool_size = 10, .response_size = 4096, .socket_timeout_sec = 5 },
+            .dns = DnsConfig{
+                .server = try allocator.dupe(u8, "8.8.8.8"),
+                .port = 53,
+                .pool_size = 10,
+                .response_size = 4096,
+                .socket_timeout_ms = 5000,
+            },
             .ssl = SslConfig{
-                .cert_file = cert_file,
-                .key_file = key_file,
+                .cert_file = try allocator.dupe(u8, "./certs/server.crt"),
+                .key_file = try allocator.dupe(u8, "./certs/server.key"),
                 .handshake_timeout_ms = 5000,
                 .handshake_max_attempts = 5,
             },
             .http = HttpConfig{
                 .buffer_size = 1460,
                 .cache_control_max_age = 300,
-            },
-            .http2 = Http2Config{
                 .max_concurrent_streams = 100,
                 .initial_window_size = 65536,
             },
@@ -126,6 +163,7 @@ pub const Config = struct {
     }
 
     pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+        allocator.free(self.server.listen_address);
         allocator.free(self.ssl.cert_file);
         allocator.free(self.ssl.key_file);
         allocator.free(self.dns.server);
