@@ -16,32 +16,32 @@ pub const ConfigError = error{
 pub const ServerConfig = struct {
     listen_address: []const u8,
     listen_port: u16,
-    max_concurrent_connections: u32 = 100,
-    connection_timeout_sec: u32 = 30,
-    max_retry_attempts: u8 = 3,
-    retry_delay_ms: u32 = 100,
+    max_concurrent_connections: u32,
+    connection_timeout_ms: u32,
+    max_retry_attempts: u8,
+    retry_delay_ms: u32,
 };
 
 pub const DnsConfig = struct {
     server: []const u8,
     port: u16,
-    pool_size: u32 = 10,
-    response_size: u32 = 4096,
-    socket_timeout_sec: u32 = 5,
+    pool_size: u32,
+    response_size: u32,
+    socket_timeout_ms: u32,
 };
 
 pub const SslConfig = struct {
     cert_file: []const u8,
     key_file: []const u8,
-    handshake_timeout_ms: u32 = 5000,
-    handshake_max_attempts: u8 = 5,
+    handshake_timeout_ms: u32,
+    handshake_max_attempts: u8,
 };
 
 pub const HttpConfig = struct {
-    buffer_size: u32 = 1460,
-    cache_control_max_age: u32 = 300,
-    max_concurrent_streams: u32 = 100,
-    initial_window_size: u32 = 65536,
+    buffer_size: u32,
+    cache_control_max_age: u32,
+    max_concurrent_streams: u32,
+    initial_window_size: u32,
 };
 
 fn getIntOrDefault(comptime T: type, obj: ?json.ObjectMap, key: []const u8, default: T) T {
@@ -104,7 +104,7 @@ pub const Config = struct {
                 .listen_address = try allocator.dupe(u8, listen_address.string),
                 .listen_port = @intCast(listen_port.integer),
                 .max_concurrent_connections = getIntOrDefault(u32, server_map, "max_concurrent_connections", 100),
-                .connection_timeout_sec = getIntOrDefault(u32, server_map, "connection_timeout_sec", 30),
+                .connection_timeout_ms = getIntOrDefault(u32, server_map, "connection_timeout_ms", 30000),
                 .max_retry_attempts = getIntOrDefault(u8, server_map, "max_retry_attempts", 3),
                 .retry_delay_ms = getIntOrDefault(u32, server_map, "retry_delay_ms", 100),
             },
@@ -113,7 +113,7 @@ pub const Config = struct {
                 .port = @intCast(dns_port.integer),
                 .pool_size = getIntOrDefault(u32, dns_map, "pool_size", 10),
                 .response_size = getIntOrDefault(u32, dns_map, "response_size", 4096),
-                .socket_timeout_sec = getIntOrDefault(u32, dns_map, "socket_timeout_sec", 5),
+                .socket_timeout_ms = getIntOrDefault(u32, dns_map, "socket_timeout_ms", 5000),
             },
             .ssl = SslConfig{
                 .cert_file = try allocator.dupe(u8, cert_file_val.string),
@@ -135,16 +135,30 @@ pub const Config = struct {
             .server = ServerConfig{
                 .listen_address = try allocator.dupe(u8, "127.0.0.1"),
                 .listen_port = 8443,
+                .max_concurrent_connections = 100,
+                .connection_timeout_ms = 30000,
+                .max_retry_attempts = 3,
+                .retry_delay_ms = 100,
             },
             .dns = DnsConfig{
                 .server = try allocator.dupe(u8, "8.8.8.8"),
                 .port = 53,
+                .pool_size = 10,
+                .response_size = 4096,
+                .socket_timeout_ms = 5000,
             },
             .ssl = SslConfig{
                 .cert_file = try allocator.dupe(u8, "./certs/server.crt"),
                 .key_file = try allocator.dupe(u8, "./certs/server.key"),
+                .handshake_timeout_ms = 5000,
+                .handshake_max_attempts = 5,
             },
-            .http = HttpConfig{},
+            .http = HttpConfig{
+                .buffer_size = 1460,
+                .cache_control_max_age = 300,
+                .max_concurrent_streams = 100,
+                .initial_window_size = 65536,
+            },
         };
     }
 
