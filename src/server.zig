@@ -52,7 +52,7 @@ pub const Server = struct {
 
         const listener_socket = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.DGRAM, std.posix.IPPROTO.UDP);
         const dns_server_addr = try std.net.Address.parseIp4(server_config.dns.server, server_config.dns.port);
-        const dns_pool = try dns.ConnectionPool.init(allocator, dns_server_addr, server_config.dns.pool_size, server_config.dns.socket_timeout_sec);
+        const dns_pool = try dns.ConnectionPool.init(allocator, dns_server_addr, server_config.dns.pool_size, server_config.dns.socket_timeout_ms);
         const listener = try https_server_addr.listen(std.net.Address.ListenOptions{});
 
         return Server{
@@ -105,7 +105,7 @@ pub const Server = struct {
         defer connection.stream.close();
 
         const timeout = std.posix.timeval{
-            .sec = @intCast(self.config.server.connection_timeout_sec),
+            .sec = @intCast(self.config.server.connection_timeout_ms / 1000),
             .usec = 0,
         };
 

@@ -18,7 +18,7 @@ pub const ConnectionPool = struct {
     dns_addr: std.net.Address,
     allocator: Allocator,
 
-    pub fn init(allocator: Allocator, dns_addr: std.net.Address, pool_size: u32, socket_timeout_sec: u32) !Self {
+    pub fn init(allocator: Allocator, dns_addr: std.net.Address, pool_size: u32, socket_timeout_ms: u32) !Self {
         var pool = Self{
             .sockets = try std.ArrayList(posix.socket_t).initCapacity(allocator, pool_size),
             .state = try std.ArrayList(SocketState).initCapacity(allocator, pool_size),
@@ -26,7 +26,10 @@ pub const ConnectionPool = struct {
             .allocator = allocator,
         };
 
-        const timeout = posix.timeval{ .sec = @intCast(socket_timeout_sec), .usec = 0 };
+        const timeout = posix.timeval{
+            .sec = @intCast(socket_timeout_ms / 1000),
+            .usec = @intCast((socket_timeout_ms % 1000) * 1000),
+        };
 
         for (0..pool_size) |_| {
             const sock = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, posix.IPPROTO.UDP);
