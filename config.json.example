@@ -1,0 +1,15 @@
+{
+  "server": {
+    "listen_address": "127.0.0.1",
+    "listen_port": 8443
+  },
+  "dns": {
+    "server": "1.1.1.1",
+    "port": 53
+  },
+  "ssl": {
+    "cert_file": "./certs/server.crt",
+    "key_file": "./certs/server.key"
+  }
+}
+
