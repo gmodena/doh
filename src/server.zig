@@ -1,6 +1,5 @@
 const std = @import("std");
-const net = std.net;
-const posix = std.posix;
+const net = std.Io.net;
 const config = @import("config.zig");
 const errorz = @import("error");
 const http = @import("http.zig");
@@ -15,16 +14,17 @@ pub const decodeUrlSafeBase64 = http.decodeUrlSafeBase64;
 const Error = errorz.Error;
 
 pub const Server = struct {
-    listener: std.net.Server,
-    listener_socket: std.posix.socket_t,
-    https_server_addr: std.net.Address,
-    dns_server_addr: std.net.Address,
+    listener: net.Server,
+    listener_socket: net.Socket,
+    https_server_addr: net.IpAddress,
+    dns_server_addr: net.IpAddress,
     ctx: *c.WOLFSSL_CTX,
     allocator: std.mem.Allocator,
     dns_pool: dns.ConnectionPool,
     config: config.Config,
+    io: std.Io,
 
-    pub fn init(allocator: std.mem.Allocator, server_config: config.Config) !Server {
+    pub fn init(io: std.Io, allocator: std.mem.Allocator, server_config: config.Config) !Server {
         // Server level ssl context, shared across connections.
         // Context lifetime should match server lifetime.
         if (c.wolfSSL_Init() != c.SSL_SUCCESS) {
@@ -44,16 +44,17 @@ pub const Server = struct {
             return Error.KeyLoadFailed;
         }
 
-        const https_server_addr = net.Address.parseIp4("127.0.0.1", server_config.server.listen_port) catch |err| {
+        const https_server_addr = net.IpAddress.parseIp4("127.0.0.1", server_config.server.listen_port) catch |err| {
             std.debug.print("An error occurred while resolving the IP address: {}\n", .{err});
             c.wolfSSL_CTX_free(ctx);
             return Error.ServerListenFailed;
         };
 
-        const listener_socket = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.DGRAM, std.posix.IPPROTO.UDP);
-        const dns_server_addr = try std.net.Address.parseIp4(server_config.dns.server, server_config.dns.port);
-        const dns_pool = try dns.ConnectionPool.init(allocator, dns_server_addr, server_config.dns.pool_size, server_config.dns.socket_timeout_ms);
-        const listener = try https_server_addr.listen(std.net.Address.ListenOptions{});
+        const ephemeral: net.IpAddress = .{ .ip4 = net.Ip4Address.unspecified(0) };
+        const listener_socket = try ephemeral.bind(io, .{ .mode = .dgram });
+        const dns_server_addr = try net.IpAddress.parseIp4(server_config.dns.server, server_config.dns.port);
+        const dns_pool = try dns.ConnectionPool.init(io, allocator, dns_server_addr, server_config.dns.pool_size);
+        const listener = try https_server_addr.listen(io, .{});
 
         return Server{
             .listener = listener,
@@ -64,13 +65,14 @@ pub const Server = struct {
             .allocator = allocator,
             .dns_pool = dns_pool,
             .config = server_config,
+            .io = io,
         };
     }
 
     // Clean up server resources
     pub fn deinit(self: *Server) void {
-        self.listener.deinit();
-        std.posix.close(self.listener_socket);
+        self.listener.deinit(self.io);
+        self.listener_socket.close(self.io);
         self.dns_pool.deinit();
         c.wolfSSL_CTX_free(self.ctx);
         _ = c.wolfSSL_Cleanup();
@@ -79,42 +81,44 @@ pub const Server = struct {
     // Accept and handle HTTPS connections
     // TODO: use async interfaces
     pub fn accept(self: *Server) !void {
-        var pool: std.Thread.Pool = undefined;
-        try pool.init(.{ .allocator = self.allocator, .n_jobs = self.config.server.max_concurrent_connections });
-        defer pool.deinit();
+        var group: std.Io.Group = .init;
 
         var connection_count: u64 = 0;
 
         while (true) {
-            const connection = self.listener.accept() catch |err| {
+            const connection = self.listener.accept(self.io) catch |err| {
                 std.log.err("Connection to client interrupted: {}\n", .{err});
                 continue;
             };
             connection_count += 1;
-            try pool.spawn(handleConnectionWithRetries, .{ self, connection });
-            std.log.debug("Connection {} accepted from {any}", .{ connection_count, connection.address });
+            group.concurrent(self.io, handleConnectionWithRetries, .{ self, connection }) catch |err| {
+                std.log.err("Failed to spawn connection handler: {}", .{err});
+                connection.close(self.io);
+                continue;
+            };
+            std.log.debug("Connection {} accepted", .{connection_count});
         }
     }
 
-    // wrap connection hadler with retry on error logic and error managment.
-    // returns void so we can pass it to Pool.spawn()
+    // wrap connection handler with retry on error logic and error management.
+    // returns void so we can pass it to Group.concurrent()
     // TODO: here we retry using only on dns server. We should support cascading or
     // round robin server pools.
     // TODO: this is hacky.
-    fn handleConnectionWithRetries(self: *Server, connection: std.net.Server.Connection) void {
-        defer connection.stream.close();
+    fn handleConnectionWithRetries(self: *Server, connection: net.Stream) void {
+        defer connection.close(self.io);
 
         const timeout = std.posix.timeval{
             .sec = @intCast(self.config.server.connection_timeout_ms / 1000),
             .usec = 0,
         };
 
-        std.posix.setsockopt(connection.stream.handle, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, std.mem.asBytes(&timeout)) catch |err| {
+        std.posix.setsockopt(connection.socket.handle, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, std.mem.asBytes(&timeout)) catch |err| {
             std.log.err("Failed to set socket timeout: {}", .{err});
             return;
         };
 
-        std.posix.setsockopt(connection.stream.handle, std.posix.SOL.SOCKET, std.posix.SO.SNDTIMEO, std.mem.asBytes(&timeout)) catch |err| {
+        std.posix.setsockopt(connection.socket.handle, std.posix.SOL.SOCKET, std.posix.SO.SNDTIMEO, std.mem.asBytes(&timeout)) catch |err| {
             std.log.err("Failed to set socket timeout: {}", .{err});
             return;
         };
@@ -126,14 +130,14 @@ pub const Server = struct {
         };
 
         errorz.retry(Server.handleConnection, .{ self, connection }, retry_policy) catch |err| {
-            std.log.err("Connection {any} failed with {}", .{ connection.address, err });
+            std.log.err("Connection fd={} failed with {}", .{ connection.socket.handle, err });
         };
 
-        std.log.info("Connection {any} completed successfully", .{connection.address});
+        std.log.info("Connection fd={} completed successfully", .{connection.socket.handle});
     }
 
     /// Handle client connection: SSL handshake, HTTP/2 setup, DNS processing
-    fn handleConnection(self: *Server, connection: std.net.Server.Connection) !void {
+    fn handleConnection(self: *Server, connection: net.Stream) !void {
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
         const allocator = arena.allocator();
@@ -215,36 +219,30 @@ pub const Server = struct {
 
         const query_transaction_id = (@as(u16, decoded[0]) << 8) | decoded[1];
 
-        const dns_socket = self.dns_pool.acquire() orelse return Error.DnsPoolExhausted;
-        defer self.dns_pool.release(dns_socket);
+        const dns_socket = self.dns_pool.acquire(self.io) orelse return Error.DnsPoolExhausted;
+        defer self.dns_pool.release(self.io, dns_socket);
 
-        const bytes_sent = try std.posix.sendto(
-            dns_socket,
-            decoded,
-            0,
-            @ptrCast(&self.dns_server_addr),
-            self.dns_server_addr.getOsSockLen(),
-        );
-        if (bytes_sent != decoded.len) {
-            return Error.DnsQueryFailed;
-        }
+        try dns_socket.send(self.io, &self.dns_server_addr, decoded);
 
         var response_buffer = try request_ctx.allocator.alloc(u8, self.config.dns.response_size);
 
-        var response_addr: std.net.Address = undefined;
-        var addrlen: u32 = self.dns_server_addr.getOsSockLen();
+        // Guard against truncation attacks; use receiveTimeout to apply DNS socket deadline.
+        const timeout: std.Io.Timeout = .{ .duration = .{
+            .raw = std.Io.Duration.fromMilliseconds(self.config.dns.socket_timeout_ms),
+            .clock = .awake,
+        } };
+        const msg = try dns_socket.receiveTimeout(self.io, response_buffer, timeout);
+        const response_size = msg.data.len;
 
-        // Guard against truncation attacks.
-        const response_size = try std.posix.recvfrom(dns_socket, response_buffer, posix.MSG.TRUNC, @ptrCast(&response_addr), &addrlen);
-
-        if (response_size <= 0) {
+        if (msg.flags.trunc) {
+            std.log.err("DNS response was truncated (exceeds {} bytes)", .{self.config.dns.response_size});
             return Error.DnsQueryFailed;
         }
 
-        if (response_size > self.config.dns.response_size) {
-            std.log.err("DNS response size ({} bytes)) exceeds max ({} bytes)", .{ response_size, self.config.dns.response_size });
+        if (response_size == 0) {
             return Error.DnsQueryFailed;
         }
+
         // Validate minimum DNS response size
         if (response_size < dns.HEADER_LEN) {
             std.log.err("DNS response too short: {} bytes", .{response_size});
@@ -252,8 +250,8 @@ pub const Server = struct {
         }
 
         // Validate response came from expected DNS server
-        if (!std.net.Address.eql(response_addr, self.dns_server_addr)) {
-            std.log.err("DNS response from unexpected address: {any}, expected: {any}", .{ response_addr, self.dns_server_addr });
+        if (!net.IpAddress.eql(&msg.from, &self.dns_server_addr)) {
+            std.log.err("DNS response from unexpected address: {any}, expected: {any}", .{ msg.from, self.dns_server_addr });
             return Error.DnsQueryFailed;
         }
 
@@ -277,3 +275,4 @@ pub const Server = struct {
         try http.sendResponse(request_ctx, response_buffer[0..response_size], self.config);
     }
 };
+

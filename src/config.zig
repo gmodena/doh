@@ -61,17 +61,14 @@ pub const Config = struct {
 
     const Self = @This();
 
-    pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) !Self {
-        const file = std.fs.cwd().openFile(file_path, .{}) catch |err| switch (err) {
+    pub fn loadFromFile(io: std.Io, allocator: std.mem.Allocator, file_path: []const u8) !Self {
+        const contents = std.Io.Dir.readFileAlloc(std.Io.Dir.cwd(), io, file_path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
             error.FileNotFound => {
                 std.log.warn("Config file not found at '{s}', using defaults", .{file_path});
                 return Self.defaults(allocator);
             },
             else => return err,
         };
-        defer file.close();
-
-        const contents = try file.readToEndAlloc(allocator, 1024 * 1024);
         defer allocator.free(contents);
 
         const parsed = try json.parseFromSlice(json.Value, allocator, contents, .{});

@@ -1,5 +1,5 @@
 const std = @import("std");
-const posix = std.posix;
+const net = std.Io.net;
 const config = @import("config.zig");
 
 const Allocator = std.mem.Allocator;
@@ -12,28 +12,25 @@ pub const QUERY_LEN = 4096; // RFC 8484 recommends 512 bytes for UDP compatibili
 pub const ConnectionPool = struct {
     const Self = @This();
 
-    sockets: std.ArrayList(posix.socket_t),
-    state: std.ArrayList(SocketState),
-    mutex: std.Thread.Mutex = .{},
-    dns_addr: std.net.Address,
+    sockets: std.ArrayListUnmanaged(net.Socket),
+    state: std.ArrayListUnmanaged(SocketState),
+    mutex: std.Io.Mutex = .init,
+    dns_addr: net.IpAddress,
     allocator: Allocator,
+    io: std.Io,
 
-    pub fn init(allocator: Allocator, dns_addr: std.net.Address, pool_size: u32, socket_timeout_ms: u32) !Self {
+    pub fn init(io: std.Io, allocator: Allocator, dns_addr: net.IpAddress, pool_size: u32) !Self {
         var pool = Self{
-            .sockets = try std.ArrayList(posix.socket_t).initCapacity(allocator, pool_size),
-            .state = try std.ArrayList(SocketState).initCapacity(allocator, pool_size),
+            .sockets = try std.ArrayListUnmanaged(net.Socket).initCapacity(allocator, pool_size),
+            .state = try std.ArrayListUnmanaged(SocketState).initCapacity(allocator, pool_size),
             .dns_addr = dns_addr,
             .allocator = allocator,
+            .io = io,
         };
 
-        const timeout = posix.timeval{
-            .sec = @intCast(socket_timeout_ms / 1000),
-            .usec = @intCast((socket_timeout_ms % 1000) * 1000),
-        };
-
+        const ephemeral: net.IpAddress = .{ .ip4 = net.Ip4Address.unspecified(0) };
         for (0..pool_size) |_| {
-            const sock = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, posix.IPPROTO.UDP);
-            try posix.setsockopt(sock, posix.SOL.SOCKET, posix.SO.RCVTIMEO, std.mem.asBytes(&timeout));
+            const sock = try ephemeral.bind(io, .{ .mode = .dgram });
             try pool.sockets.append(pool.allocator, sock);
             try pool.state.append(pool.allocator, SocketState.available);
         }
@@ -41,16 +38,16 @@ pub const ConnectionPool = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        for (self.sockets.items) |sock| {
-            posix.close(sock);
+        for (self.sockets.items) |*sock| {
+            sock.close(self.io);
         }
         self.sockets.deinit(self.allocator);
         self.state.deinit(self.allocator);
     }
 
-    pub fn acquire(self: *Self) ?posix.socket_t {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+    pub fn acquire(self: *Self, io: std.Io) ?net.Socket {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
 
         for (self.state.items, 0..) |state, i| {
             if (state == .available) {
@@ -61,12 +58,12 @@ pub const ConnectionPool = struct {
         return null;
     }
 
-    pub fn release(self: *Self, socket: posix.socket_t) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+    pub fn release(self: *Self, io: std.Io, socket: net.Socket) void {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
 
         for (self.sockets.items, 0..) |sock, i| {
-            if (sock == socket) {
+            if (sock.handle == socket.handle) {
                 switch (self.state.items[i]) {
                     .in_use => {
                         self.state.items[i] = .available;
