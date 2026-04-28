@@ -1,5 +1,5 @@
 const std = @import("std");
-const net = std.net;
+const net = std.Io.net;
 const posix = std.posix;
 const config = @import("config.zig");
 const errorz = @import("error");
@@ -80,7 +80,7 @@ pub const SslConnection = struct {
         };
     }
 
-    pub fn performHandshake(self: *Self, server_config: config.Config, client_address: std.net.Address) !void {
+    pub fn performHandshake(self: *Self, server_config: config.Config) !void {
         const Inner = struct {
             fn doSslAccept(s: *Self) !void {
                 const result = c.wolfSSL_accept(s.ssl);
@@ -98,12 +98,12 @@ pub const SslConnection = struct {
 
         errorz.retry(Inner.doSslAccept, .{self}, policy) catch |err| {
             self.state = .error_state;
-            std.log.warn("SSL handshake failed from {any}: {}", .{ client_address, err });
+            std.log.warn("SSL handshake failed: {}", .{err});
             return err;
         };
 
         self.state = .connected;
-        std.log.debug("SSL handshake successful for {any}", .{client_address});
+        std.log.debug("SSL handshake successful", .{});
     }
 
     pub fn isConnected(self: *const Self) bool {
@@ -137,11 +137,11 @@ pub const RequestContext = struct {
     name: [*c]const u8 = null,
     value: [*c]const u8 = null,
 
-    connection: std.net.Server.Connection,
+    connection: net.Stream,
     allocator: std.mem.Allocator,
 
-    pub fn init(connection: std.net.Server.Connection, allocator: std.mem.Allocator, ctx: *c.WOLFSSL_CTX) !RequestContext {
-        const ssl_connection = try SslConnection.init(ctx, connection.stream.handle);
+    pub fn init(connection: net.Stream, allocator: std.mem.Allocator, ctx: *c.WOLFSSL_CTX) !RequestContext {
+        const ssl_connection = try SslConnection.init(ctx, connection.socket.handle);
 
         return RequestContext{
             .ssl_connection = ssl_connection,
@@ -152,7 +152,7 @@ pub const RequestContext = struct {
     }
 
     pub fn performHandshake(self: *Self, server_config: config.Config) !void {
-        try self.ssl_connection.performHandshake(server_config, self.connection.address);
+        try self.ssl_connection.performHandshake(server_config);
     }
 
     pub fn createSession(self: *Self, callbacks: ?*c.nghttp2_session_callbacks, server_config: config.Config) !void {

@@ -28,7 +28,6 @@
             buildInputs = with pkgs; [
               zig
               zls
-              c-ares
               wolfssl.dev
               glibc
               glibc.dev
@@ -40,9 +39,6 @@
               gdb
               dnslookup
               mkcert
-              vscode
-              vscode-extensions.ziglang.vscode-zig
-              claude-code
               dig
               certbot
               woodpecker-cli

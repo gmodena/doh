@@ -37,15 +37,21 @@ pub const RetryPolicy = struct {
     should_retry: ?*const fn (anyerror) bool = null,
 };
 
+fn milliTimestamp() i64 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC, &ts);
+    return @as(i64, ts.sec) * 1000 + @divTrunc(@as(i64, ts.nsec), std.time.ns_per_ms);
+}
+
 fn retryCall(comptime Context: type, context: Context, config: RetryPolicy) !void {
     var attempt: u8 = 0;
-    const start_time = if (config.timeout_ms) |_| std.time.milliTimestamp() else 0;
+    const start_time = if (config.timeout_ms) |_| milliTimestamp() else 0;
 
     while (attempt < config.max_tries) {
         attempt += 1;
 
         if (config.timeout_ms) |timeout| {
-            if (std.time.milliTimestamp() - start_time > timeout) {
+            if (milliTimestamp() - start_time > timeout) {
                 return error.OperationTimeout;
             }
         }
@@ -58,7 +64,8 @@ fn retryCall(comptime Context: type, context: Context, config: RetryPolicy) !voi
 
             if (should_retry and attempt < config.max_tries) {
                 if (config.delay_ms) |delay| {
-                    std.Thread.sleep(@as(u64, delay) * std.time.ns_per_ms);
+                    const ts = std.c.timespec{ .sec = 0, .nsec = @as(isize, @intCast(delay)) * std.time.ns_per_ms };
+                    _ = std.c.nanosleep(&ts, null);
                 }
                 continue;
             }
