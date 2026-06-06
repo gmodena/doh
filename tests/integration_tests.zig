@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const server = @import("server");
-const net = std.net;
+const net = std.Io.net;
 const time = std.time;
 
 const TestClient = struct {
@@ -58,7 +58,7 @@ const TestClient = struct {
 };
 
 test "DNS query creation" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -75,7 +75,7 @@ test "DNS query creation" {
 }
 
 test "DNS query encoding" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -122,7 +122,7 @@ test "Address parsing validation" {
     };
 
     for (ipv4_tests) |test_case| {
-        const result = net.Address.parseIp4(test_case.ip, test_case.port);
+        const result = net.IpAddress.parseIp4(test_case.ip, test_case.port);
         if (test_case.should_succeed) {
             _ = result catch |err| {
                 std.debug.print("Unexpected error for {s}: {}\n", .{ test_case.ip, err });
@@ -139,7 +139,7 @@ test "Address parsing validation" {
 }
 
 test "Memory allocation patterns" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -170,7 +170,7 @@ test "Concurrent connection simulation" {
 
     for (&connection_data, 0..) |*conn, i| {
         conn.id = @intCast(i);
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        var gpa = std.heap.DebugAllocator(.{}){};
         defer _ = gpa.deinit();
         const allocator = gpa.allocator();
 
@@ -188,7 +188,7 @@ test "Concurrent connection simulation" {
 }
 
 test "Error handling" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -247,7 +247,7 @@ test "DNS query parameter parsing" {
 }
 
 test "Resource cleanup simulation" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -280,7 +280,7 @@ test "Resource cleanup simulation" {
 }
 
 test "Stress test: multiple DNS queries" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

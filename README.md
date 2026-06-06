@@ -1,12 +1,23 @@
 # DoH
 
-A [RFC8484](https://datatracker.ietf.org/doc/html/rfc8484) DNS-over-HTTPS (DoH) server implementation in Zig using [WolfSSL](https://www.wolfssl.com/) and [nghttp2](https://nghttp2.org/).
+A [RFC8484](https://datatracker.ietf.org/doc/html/rfc8484) DNS-over-HTTPS (DoH)
+server implementation in Zig using [WolfSSL](https://www.wolfssl.com/) and
+[nghttp2](https://nghttp2.org/).
 
 ## Dependencies
 
-- Zig 0.15+
+- Zig 0.16+
 - wolfssl
 - nghttp2
+
+This project uses [Nix](https://nixos.org/explore/) to manage its development
+environment.
+
+```
+nix develop
+```
+
+Will drop you in a shell with zig and all build and runtime dependencies required.
 
 ## Run
 
