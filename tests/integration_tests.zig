@@ -163,10 +163,11 @@ test "Memory allocation patterns" {
 
 test "Concurrent connection simulation" {
     const max_connections = 1;
-    var connection_data = [_]struct {
+    var connection_data: [max_connections]struct {
         id: u32,
         processed: bool,
-    }{.{ .id = 0, .processed = false }} ** max_connections;
+    } = undefined;
+    for (&connection_data) |*d| d.* = .{ .id = 0, .processed = false };
 
     for (&connection_data, 0..) |*conn, i| {
         conn.id = @intCast(i);

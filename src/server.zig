@@ -1,10 +1,11 @@
 const std = @import("std");
 const net = std.Io.net;
+const bio = @import("bio.zig");
 const config = @import("config.zig");
 const errorz = @import("error");
 const http = @import("http.zig");
 const dns = @import("dns.zig");
-const c = @import("cimports.zig").c;
+const c = @import("c");
 
 const Allocator = std.mem.Allocator;
 
@@ -23,7 +24,6 @@ pub const Server = struct {
     dns_pool: dns.ConnectionPool,
     config: config.Config,
     io: std.Io,
-    semaphore: std.Io.Semaphore,
 
     pub fn init(io: std.Io, allocator: std.mem.Allocator, server_config: config.Config) !Server {
         // Server level ssl context, shared across connections.
@@ -31,30 +31,35 @@ pub const Server = struct {
         if (c.wolfSSL_Init() != c.SSL_SUCCESS) {
             return Error.SslInitFailed;
         }
+        errdefer _ = c.wolfSSL_Cleanup();
 
         const ctx = c.wolfSSL_CTX_new(c.wolfTLSv1_3_server_method()) orelse
             return Error.SslInitFailed;
+        errdefer c.wolfSSL_CTX_free(ctx);
+
+        bio.registerCallbacks(ctx);
 
         if (c.wolfSSL_CTX_use_certificate_file(ctx, server_config.ssl.cert_file.ptr, c.SSL_FILETYPE_PEM) != c.SSL_SUCCESS) {
-            c.wolfSSL_CTX_free(ctx);
             return Error.CertLoadFailed;
         }
 
         if (c.wolfSSL_CTX_use_PrivateKey_file(ctx, server_config.ssl.key_file.ptr, c.SSL_FILETYPE_PEM) != c.SSL_SUCCESS) {
-            c.wolfSSL_CTX_free(ctx);
             return Error.KeyLoadFailed;
         }
 
         const https_server_addr = net.IpAddress.parseIp4("127.0.0.1", server_config.server.listen_port) catch |err| {
             std.debug.print("An error occurred while resolving the IP address: {}\n", .{err});
-            c.wolfSSL_CTX_free(ctx);
             return Error.ServerListenFailed;
         };
 
         const ephemeral: net.IpAddress = .{ .ip4 = net.Ip4Address.unspecified(0) };
         const listener_socket = try ephemeral.bind(io, .{ .mode = .dgram });
+        errdefer listener_socket.close(io);
+
         const dns_server_addr = try net.IpAddress.parseIp4(server_config.dns.server, server_config.dns.port);
-        const dns_pool = try dns.ConnectionPool.init(io, allocator, dns_server_addr, server_config.dns.pool_size);
+        var dns_pool = try dns.ConnectionPool.init(io, allocator, dns_server_addr, server_config.dns.pool_size);
+        errdefer dns_pool.deinit();
+
         const listener = try https_server_addr.listen(io, .{});
 
         return Server{
@@ -67,7 +72,6 @@ pub const Server = struct {
             .dns_pool = dns_pool,
             .config = server_config,
             .io = io,
-            .semaphore = .{ .permits = server_config.server.max_concurrent_connections },
         };
     }
 
@@ -93,9 +97,7 @@ pub const Server = struct {
                 continue;
             };
             connection_count += 1;
-            self.semaphore.waitUncancelable(self.io);
             group.concurrent(self.io, handleConnectionWithRetries, .{ self, connection }) catch |err| {
-                self.semaphore.post(self.io);
                 std.log.err("Failed to spawn connection handler: {}", .{err});
                 connection.close(self.io);
                 continue;
@@ -110,7 +112,6 @@ pub const Server = struct {
     // round robin server pools.
     // TODO: this is hacky.
     fn handleConnectionWithRetries(self: *Server, connection: net.Stream) void {
-        defer self.semaphore.post(self.io);
         defer connection.close(self.io);
 
         const timeout = std.posix.timeval{
@@ -146,9 +147,10 @@ pub const Server = struct {
 
         var request_ctx = try http.RequestContext.init(connection, allocator, self.ctx);
         defer request_ctx.cleanup();
+        request_ctx.bindIo(self.io);
 
         // SSL handshake
-        try request_ctx.performHandshake(self.config);
+        try request_ctx.performHandshake();
 
         // HTTP2 setup
         var callbacks: ?*c.nghttp2_session_callbacks = null;
@@ -198,10 +200,8 @@ pub const Server = struct {
                 break;
             } else {
                 const ssl_error = c.wolfSSL_get_error(request_ctx.ssl_connection.ssl, bytes_read);
-                if (ssl_error != c.SSL_ERROR_WANT_READ and ssl_error != c.SSL_ERROR_WANT_WRITE) {
-                    std.log.info("SSL error: {}", .{ssl_error});
-                    return Error.DnsQueryFailed;
-                }
+                std.log.info("SSL error: {}", .{ssl_error});
+                return Error.DnsQueryFailed;
             }
         }
 

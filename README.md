@@ -6,7 +6,7 @@ server implementation in Zig using [WolfSSL](https://www.wolfssl.com/) and
 
 ## Dependencies
 
-- Zig 0.16+
+- Zig 0.17+
 - wolfssl
 - nghttp2
 
@@ -17,7 +17,8 @@ environment.
 nix develop
 ```
 
-Will drop you in a shell with zig and all build and runtime dependencies required.
+Will drop you in a shell with zig (nightly) and all build and runtime
+dependencies required.
 
 ## Run
 

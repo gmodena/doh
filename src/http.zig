@@ -1,10 +1,11 @@
 const std = @import("std");
 const net = std.Io.net;
 const posix = std.posix;
+const bio = @import("bio.zig");
 const config = @import("config.zig");
 const errorz = @import("error");
 const dns = @import("dns.zig");
-const c = @import("cimports.zig").c;
+const c = @import("c");
 
 const Allocator = std.mem.Allocator;
 const Error = errorz.Error;
@@ -56,22 +57,15 @@ pub const SslConnection = struct {
 
     ssl: ?*c.WOLFSSL = null,
     state: SslState = .uninitialized,
-    error_code: ?c_int = null,
-    handshake_attempts: u32 = 0,
 
-    pub fn init(ctx: *c.WOLFSSL_CTX, socket_fd: std.posix.fd_t) !SslConnection {
+    pub fn init(ctx: *c.WOLFSSL_CTX) !SslConnection {
         const ssl = c.wolfSSL_new(ctx) orelse return Error.SslInitFailed;
-        errdefer c.wolfSSL_Free(ssl);
+        errdefer c.wolfSSL_free(ssl);
 
         var h2_alpn_buf: [2]u8 = "h2".*;
-        const h2_alpn = &h2_alpn_buf;
 
-        if (c.wolfSSL_UseALPN(ssl, h2_alpn, ALPN_H2.len, c.WOLFSSL_ALPN_CONTINUE_ON_MISMATCH) != c.SSL_SUCCESS) {
+        if (c.wolfSSL_UseALPN(ssl, &h2_alpn_buf, ALPN_H2.len, c.WOLFSSL_ALPN_CONTINUE_ON_MISMATCH) != c.SSL_SUCCESS) {
             return Error.AlpnFailed;
-        }
-
-        if (c.wolfSSL_set_fd(ssl, socket_fd) != c.SSL_SUCCESS) {
-            return Error.SslInitFailed;
         }
 
         return SslConnection{
@@ -80,28 +74,14 @@ pub const SslConnection = struct {
         };
     }
 
-    pub fn performHandshake(self: *Self, server_config: config.Config) !void {
-        const Inner = struct {
-            fn doSslAccept(s: *Self) !void {
-                const result = c.wolfSSL_accept(s.ssl);
-                if (result == c.SSL_SUCCESS) return;
-                s.error_code = c.wolfSSL_get_error(s.ssl, result);
-                std.log.debug("performHandshake. SSL handshake failed with wolfSSL error code {}", .{s.error_code.?});
-                return error.SslHandshakeFailed;
-            }
-        };
-
-        const policy = errorz.RetryPolicy{
-            .max_tries = server_config.ssl.handshake_max_attempts,
-            .timeout_ms = server_config.ssl.handshake_timeout_ms,
-        };
-
-        errorz.retry(Inner.doSslAccept, .{self}, policy) catch |err| {
+    pub fn performHandshake(self: *Self) !void {
+        const result = c.wolfSSL_accept(self.ssl);
+        if (result != c.SSL_SUCCESS) {
             self.state = .error_state;
-            std.log.warn("SSL handshake failed: {}", .{err});
-            return err;
-        };
-
+            const err_code = c.wolfSSL_get_error(self.ssl, result);
+            std.log.warn("SSL handshake failed, wolfSSL error: {d}", .{err_code});
+            return error.SslHandshakeFailed;
+        }
         self.state = .connected;
         std.log.debug("SSL handshake successful", .{});
     }
@@ -139,20 +119,25 @@ pub const RequestContext = struct {
 
     connection: net.Stream,
     allocator: std.mem.Allocator,
+    io_ctx: bio.IoCtx = undefined,
 
     pub fn init(connection: net.Stream, allocator: std.mem.Allocator, ctx: *c.WOLFSSL_CTX) !RequestContext {
-        const ssl_connection = try SslConnection.init(ctx, connection.socket.handle);
+        const ssl_connection = try SslConnection.init(ctx);
 
         return RequestContext{
             .ssl_connection = ssl_connection,
             .connection = connection,
             .allocator = allocator,
-            //  .server = server,
         };
     }
 
-    pub fn performHandshake(self: *Self, server_config: config.Config) !void {
-        try self.ssl_connection.performHandshake(server_config);
+    pub fn bindIo(self: *Self, io: std.Io) void {
+        self.io_ctx = .{ .io = io, .handle = self.connection.socket.handle };
+        bio.bindToSsl(self.ssl_connection.ssl.?, &self.io_ctx);
+    }
+
+    pub fn performHandshake(self: *Self) !void {
+        try self.ssl_connection.performHandshake();
     }
 
     pub fn createSession(self: *Self, callbacks: ?*c.nghttp2_session_callbacks, server_config: config.Config) !void {

@@ -10,9 +10,10 @@ pub fn main() !void {
     defer if (gpa.deinit() != .ok) @panic("leak");
     const allocator = gpa.allocator();
 
-    var threaded = std.Io.Threaded.init(allocator, .{});
-    defer threaded.deinit();
-    const io = threaded.io();
+    var evented: std.Io.Evented = undefined;
+    try evented.init(allocator, .{});
+    defer evented.deinit();
+    const io = evented.io();
 
     const server_config = try Config.loadFromFile(io, allocator, "config.json");
     defer server_config.deinit(allocator);

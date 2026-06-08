@@ -15,6 +15,23 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    const translate_c = b.addTranslateC(.{
+        .root_source_file = b.path("src/c.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    // Pass include paths from C_INCLUDE_PATH (set by nix dev shell) to the
+    // translate-c step so it can find headers
+    if (b.graph.environ_map.get("C_INCLUDE_PATH")) |include_paths| {
+        var iter = std.mem.splitScalar(u8, include_paths, ':');
+        while (iter.next()) |inc_path| {
+            if (inc_path.len > 0) {
+                translate_c.addIncludePath(.{ .cwd_relative = inc_path });
+            }
+        }
+    }
+    const c_module = translate_c.createModule();
+
     // Create error module first (public module)
     const error_module = b.addModule("error", .{
         .root_source_file = b.path("src/error.zig"),
@@ -29,6 +46,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     exe_module.addImport("error", error_module);
+    exe_module.addImport("c", c_module);
     exe_module.linkSystemLibrary("c", .{});
     exe_module.linkSystemLibrary("wolfssl", .{});
     exe_module.linkSystemLibrary("nghttp2", .{});
@@ -51,12 +69,6 @@ pub fn build(b: *std.Build) void {
     // files, this ensures they will be present and in the expected location.
     run_cmd.step.dependOn(b.getInstallStep());
 
-    // This allows the user to pass arguments to the application in the build
-    // command itself, like this: `zig build run -- arg1 arg2 etc`
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
-
     // This creates a build step. It will be visible in the `zig build --help` menu,
     // and can be selected like this: `zig build run`
     // This will evaluate the `run` step rather than the default, which is "install".
@@ -71,6 +83,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     lib_unit_tests_module.addImport("error", error_module);
+    lib_unit_tests_module.addImport("c", c_module);
     lib_unit_tests_module.linkSystemLibrary("c", .{});
     lib_unit_tests_module.linkSystemLibrary("wolfssl", .{});
     lib_unit_tests_module.linkSystemLibrary("nghttp2", .{});
@@ -88,6 +101,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     server_module.addImport("error", error_module);
+    server_module.addImport("c", c_module);
+    server_module.linkSystemLibrary("wolfssl", .{});
+    server_module.linkSystemLibrary("nghttp2", .{});
 
     // Add comprehensive test suite
     const doh_tests_module = b.createModule(.{
