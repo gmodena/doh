@@ -23,6 +23,7 @@ pub const Server = struct {
     dns_pool: dns.ConnectionPool,
     config: config.Config,
     io: std.Io,
+    semaphore: std.Io.Semaphore,
 
     pub fn init(io: std.Io, allocator: std.mem.Allocator, server_config: config.Config) !Server {
         // Server level ssl context, shared across connections.
@@ -66,6 +67,7 @@ pub const Server = struct {
             .dns_pool = dns_pool,
             .config = server_config,
             .io = io,
+            .semaphore = .{ .permits = server_config.server.max_concurrent_connections },
         };
     }
 
@@ -91,7 +93,9 @@ pub const Server = struct {
                 continue;
             };
             connection_count += 1;
+            self.semaphore.waitUncancelable(self.io);
             group.concurrent(self.io, handleConnectionWithRetries, .{ self, connection }) catch |err| {
+                self.semaphore.post(self.io);
                 std.log.err("Failed to spawn connection handler: {}", .{err});
                 connection.close(self.io);
                 continue;
@@ -106,27 +110,26 @@ pub const Server = struct {
     // round robin server pools.
     // TODO: this is hacky.
     fn handleConnectionWithRetries(self: *Server, connection: net.Stream) void {
+        defer self.semaphore.post(self.io);
         defer connection.close(self.io);
 
         const timeout = std.posix.timeval{
             .sec = @intCast(self.config.server.connection_timeout_ms / 1000),
             .usec = 0,
         };
-
         std.posix.setsockopt(connection.socket.handle, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, std.mem.asBytes(&timeout)) catch |err| {
-            std.log.err("Failed to set socket timeout: {}", .{err});
+            std.log.err("Failed to set SO_RCVTIMEO: {}", .{err});
             return;
         };
-
         std.posix.setsockopt(connection.socket.handle, std.posix.SOL.SOCKET, std.posix.SO.SNDTIMEO, std.mem.asBytes(&timeout)) catch |err| {
-            std.log.err("Failed to set socket timeout: {}", .{err});
+            std.log.err("Failed to set SO_SNDTIMEO: {}", .{err});
             return;
         };
 
         const retry_policy = errorz.RetryPolicy{
             .max_tries = self.config.server.max_retry_attempts,
             .delay_ms = 3,
-            .timeout_ms = 100,
+            .timeout_ms = self.config.server.connection_timeout_ms,
         };
 
         errorz.retry(Server.handleConnection, .{ self, connection }, retry_policy) catch |err| {
@@ -189,6 +192,7 @@ pub const Server = struct {
                 try self.processDnsQuery(request_ctx);
                 break;
             } else if (bytes_read == 0) {
+                std.log.debug("EOF: dns_request.len={}", .{request_ctx.dns_request.len});
                 if (request_ctx.dns_request.len > 0) {
                     try self.processDnsQuery(request_ctx);
                 }
@@ -204,6 +208,7 @@ pub const Server = struct {
 
         _ = c.nghttp2_session_terminate_session(request_ctx.session, c.NGHTTP2_NO_ERROR);
         _ = c.nghttp2_session_send(request_ctx.session);
+
     }
 
     // Process DNS request: decode query, forward to DNS server, send response
@@ -275,4 +280,3 @@ pub const Server = struct {
         try http.sendResponse(request_ctx, response_buffer[0..response_size], self.config);
     }
 };
-

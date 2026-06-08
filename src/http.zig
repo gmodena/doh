@@ -86,6 +86,7 @@ pub const SslConnection = struct {
                 const result = c.wolfSSL_accept(s.ssl);
                 if (result == c.SSL_SUCCESS) return;
                 s.error_code = c.wolfSSL_get_error(s.ssl, result);
+                std.log.debug("performHandshake. SSL handshake failed with wolfSSL error code {}", .{s.error_code.?});
                 return error.SslHandshakeFailed;
             }
         };

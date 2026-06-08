@@ -158,7 +158,7 @@ test "Server init: invalid certificate path" {
     config.ssl.cert_file = try testing.allocator.dupe(u8, "/nonexistent/cert.pem");
     config.ssl.key_file = try testing.allocator.dupe(u8, "/nonexistent/key.pem");
 
-    const result = server.Server.init(testing.allocator, config);
+    const result = server.Server.init(std.testing.io, testing.allocator, config);
     try testing.expectError(error.CertLoadFailed, result);
 }
 
