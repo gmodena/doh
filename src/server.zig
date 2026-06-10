@@ -128,7 +128,6 @@ pub const Server = struct {
 
         const retry_policy = errorz.RetryPolicy{
             .max_tries = self.config.server.max_retry_attempts,
-            .delay_ms = 3,
             .timeout_ms = self.config.server.connection_timeout_ms,
         };
 
@@ -208,7 +207,6 @@ pub const Server = struct {
 
         _ = c.nghttp2_session_terminate_session(request_ctx.session, c.NGHTTP2_NO_ERROR);
         _ = c.nghttp2_session_send(request_ctx.session);
-
     }
 
     // Process DNS request: decode query, forward to DNS server, send response
@@ -224,7 +222,7 @@ pub const Server = struct {
 
         const query_transaction_id = (@as(u16, decoded[0]) << 8) | decoded[1];
 
-        const dns_socket = self.dns_pool.acquire(self.io) orelse return Error.DnsPoolExhausted;
+        const dns_socket = self.dns_pool.acquire(self.io);
         defer self.dns_pool.release(self.io, dns_socket);
 
         try dns_socket.send(self.io, &self.dns_server_addr, decoded);

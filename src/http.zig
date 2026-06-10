@@ -93,7 +93,6 @@ pub const SslConnection = struct {
 
         const policy = errorz.RetryPolicy{
             .max_tries = server_config.ssl.handshake_max_attempts,
-            .delay_ms = 10,
             .timeout_ms = server_config.ssl.handshake_timeout_ms,
         };
 
