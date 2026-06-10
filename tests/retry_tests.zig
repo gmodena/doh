@@ -14,7 +14,6 @@ test "retry: basic retry" {
 
     const policy = errorz.RetryPolicy{
         .max_tries = 5,
-        .delay_ms = 2,
         .timeout_ms = 10,
     };
 

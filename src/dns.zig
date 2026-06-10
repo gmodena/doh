@@ -15,18 +15,13 @@ pub const ConnectionPool = struct {
     sockets: std.ArrayListUnmanaged(net.Socket),
     state: std.ArrayListUnmanaged(SocketState),
     mutex: std.Io.Mutex = .init,
+    semaphore: std.Io.Semaphore,
     dns_addr: net.IpAddress,
     allocator: Allocator,
     io: std.Io,
 
     pub fn init(io: std.Io, allocator: Allocator, dns_addr: net.IpAddress, pool_size: u32) !Self {
-        var pool = Self{
-            .sockets = try std.ArrayListUnmanaged(net.Socket).initCapacity(allocator, pool_size),
-            .state = try std.ArrayListUnmanaged(SocketState).initCapacity(allocator, pool_size),
-            .dns_addr = dns_addr,
-            .allocator = allocator,
-            .io = io,
-        };
+        var pool = Self{ .sockets = try std.ArrayListUnmanaged(net.Socket).initCapacity(allocator, pool_size), .state = try std.ArrayListUnmanaged(SocketState).initCapacity(allocator, pool_size), .dns_addr = dns_addr, .allocator = allocator, .io = io, .semaphore = .{ .permits = pool_size } };
 
         const ephemeral: net.IpAddress = .{ .ip4 = net.Ip4Address.unspecified(0) };
         for (0..pool_size) |_| {
@@ -45,7 +40,8 @@ pub const ConnectionPool = struct {
         self.state.deinit(self.allocator);
     }
 
-    pub fn acquire(self: *Self, io: std.Io) ?net.Socket {
+    pub fn acquire(self: *Self, io: std.Io) net.Socket {
+        self.semaphore.waitUncancelable(io);
         self.mutex.lockUncancelable(io);
         defer self.mutex.unlock(io);
 
@@ -55,11 +51,12 @@ pub const ConnectionPool = struct {
                 return self.sockets.items[i];
             }
         }
-        return null;
+        unreachable;
     }
 
     pub fn release(self: *Self, io: std.Io, socket: net.Socket) void {
         self.mutex.lockUncancelable(io);
+        defer self.semaphore.post(io);
         defer self.mutex.unlock(io);
 
         for (self.sockets.items, 0..) |sock, i| {

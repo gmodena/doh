@@ -26,13 +26,11 @@ const RetryableError = enum {
 ///
 /// Fields:
 /// - max_tries: Maximum number of retry attempts
-/// - delay_ms: Optional delay between retries in milliseconds
 /// - timeout_ms: Optional total operation timeout in milliseconds
 /// - should_retry: Optional custom function to determine if an error should trigger a retry.
 ///                 Used to filter error classes.
 pub const RetryPolicy = struct {
     max_tries: u8,
-    delay_ms: ?u32,
     timeout_ms: ?u32,
     should_retry: ?*const fn (anyerror) bool = null,
 };
@@ -63,10 +61,6 @@ fn retryCall(comptime Context: type, context: Context, config: RetryPolicy) !voi
                 shouldRetry(err);
 
             if (should_retry and attempt < config.max_tries) {
-                if (config.delay_ms) |delay| {
-                    const ts = std.c.timespec{ .sec = 0, .nsec = @as(isize, @intCast(delay)) * std.time.ns_per_ms };
-                    _ = std.c.nanosleep(&ts, null);
-                }
                 continue;
             }
             return err;
@@ -78,8 +72,6 @@ fn retryCall(comptime Context: type, context: Context, config: RetryPolicy) !voi
 fn shouldRetry(err: anyerror) bool {
     return switch (err) {
         error.DnsQueryFailed,
-        error.SslHandshakeFailed,
-        error.DnsPoolExhausted,
         => true,
         else => false,
     };
