@@ -45,7 +45,7 @@ pub const Server = struct {
             return Error.KeyLoadFailed;
         }
 
-        const https_server_addr = net.IpAddress.parseIp4("127.0.0.1", server_config.server.listen_port) catch |err| {
+        const https_server_addr = net.IpAddress.parseIp4(server_config.server.listen_address, server_config.server.listen_port) catch |err| {
             std.debug.print("An error occurred while resolving the IP address: {}\n", .{err});
             c.wolfSSL_CTX_free(ctx);
             return Error.ServerListenFailed;
