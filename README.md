@@ -55,6 +55,24 @@ zig build run
 
 Point your browser to `https://<listen_address>:<listen_port>/dns-query`.
 
+## Docker
+
+Build the image via the Nix flake:
+
+```
+nix build .#dockerImage
+docker load < result
+```
+
+Run the container (requires `config.json` and `certs/` — see [Run](#run)):
+
+```
+docker run --rm -p 8443:8443 \
+  -v $(pwd)/config.json:/app/config.json \
+  -v $(pwd)/certs:/app/certs \
+  doh:latest
+```
+
 ## Test
 
 ```
