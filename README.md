@@ -17,7 +17,8 @@ environment.
 nix develop
 ```
 
-Will drop you in a shell with zig and all build and runtime dependencies required.
+Will drop you in a shell with zig and all build and runtime dependencies
+required.
 
 ## Run
 
