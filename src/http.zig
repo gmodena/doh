@@ -112,6 +112,17 @@ pub const SslConnection = struct {
 
     pub fn cleanup(self: *Self) void {
         if (self.ssl) |ssl| {
+            while (true) {
+                const ret: c_int = c.wolfSSL_shutdown(ssl);
+                if (ret == 1) break;
+                if (ret == 2) continue;
+                if (ret == 0) continue;
+
+                const err: c_int = c.wolfSSL_get_error(ssl, ret);
+                var buffer: [80]u8 = std.mem.zeroes([80]u8);
+                _ = c.wolfSSL_ERR_error_string(@intCast(err), &buffer[0]);
+                std.log.err("SSL shutdown failed. ret={}, error_code={}. {s}", .{ ret, err, buffer });
+            }
             c.wolfSSL_free(ssl);
             self.ssl = null;
         }

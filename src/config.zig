@@ -16,6 +16,7 @@ pub const ConfigError = error{
 pub const ServerConfig = struct {
     listen_address: []const u8,
     listen_port: u16,
+    metrics_port: u16,
     max_concurrent_connections: u32,
     connection_timeout_ms: u32,
     max_retry_attempts: u8,
@@ -100,6 +101,7 @@ pub const Config = struct {
             .server = ServerConfig{
                 .listen_address = try allocator.dupe(u8, listen_address.string),
                 .listen_port = @intCast(listen_port.integer),
+                .metrics_port = getIntOrDefault(u16, server_map, "metrics_port", 8192),
                 .max_concurrent_connections = getIntOrDefault(u32, server_map, "max_concurrent_connections", 100),
                 .connection_timeout_ms = getIntOrDefault(u32, server_map, "connection_timeout_ms", 30000),
                 .max_retry_attempts = getIntOrDefault(u8, server_map, "max_retry_attempts", 3),
@@ -132,6 +134,7 @@ pub const Config = struct {
             .server = ServerConfig{
                 .listen_address = try allocator.dupe(u8, "127.0.0.1"),
                 .listen_port = 8443,
+                .metrics_port = 8192,
                 .max_concurrent_connections = 100,
                 .connection_timeout_ms = 30000,
                 .max_retry_attempts = 3,

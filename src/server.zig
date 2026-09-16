@@ -6,6 +6,8 @@ const http = @import("http.zig");
 const dns = @import("dns.zig");
 const c = @import("cimports.zig").c;
 
+const prom = @import("metrics.zig");
+
 const Allocator = std.mem.Allocator;
 
 pub const Config = config.Config;
@@ -24,8 +26,9 @@ pub const Server = struct {
     config: config.Config,
     io: std.Io,
     semaphore: std.Io.Semaphore,
+    metrics: *prom.Metrics,
 
-    pub fn init(io: std.Io, allocator: std.mem.Allocator, server_config: config.Config) !Server {
+    pub fn init(io: std.Io, allocator: std.mem.Allocator, server_config: config.Config, metrics: *prom.Metrics) !Server {
         // Server level ssl context, shared across connections.
         // Context lifetime should match server lifetime.
         if (c.wolfSSL_Init() != c.SSL_SUCCESS) {
@@ -57,18 +60,7 @@ pub const Server = struct {
         const dns_pool = try dns.ConnectionPool.init(io, allocator, dns_server_addr, server_config.dns.pool_size);
         const listener = try https_server_addr.listen(io, .{});
 
-        return Server{
-            .listener = listener,
-            .listener_socket = listener_socket,
-            .https_server_addr = https_server_addr,
-            .dns_server_addr = dns_server_addr,
-            .ctx = ctx,
-            .allocator = allocator,
-            .dns_pool = dns_pool,
-            .config = server_config,
-            .io = io,
-            .semaphore = .{ .permits = server_config.server.max_concurrent_connections },
-        };
+        return Server{ .listener = listener, .listener_socket = listener_socket, .https_server_addr = https_server_addr, .dns_server_addr = dns_server_addr, .ctx = ctx, .allocator = allocator, .dns_pool = dns_pool, .config = server_config, .io = io, .semaphore = .{ .permits = server_config.server.max_concurrent_connections }, .metrics = metrics };
     }
 
     // Clean up server resources
@@ -113,6 +105,12 @@ pub const Server = struct {
         defer self.semaphore.post(self.io);
         defer connection.close(self.io);
 
+        const start = std.Io.Timestamp.now(self.io, .awake).toMilliseconds();
+        defer {
+            const elapsed: u64 = @intCast(std.Io.Timestamp.now(self.io, .awake).toMilliseconds() - start);
+            self.metrics.recordLatency(elapsed);
+        }
+
         const timeout = std.posix.timeval{
             .sec = @intCast(self.config.server.connection_timeout_ms / 1000),
             .usec = 0,
@@ -131,17 +129,20 @@ pub const Server = struct {
             .timeout_ms = self.config.server.connection_timeout_ms,
         };
 
-        errorz.retry(Server.handleConnection, .{ self, connection }, retry_policy) catch |err| {
+        if (errorz.retry(Server.handleConnection, .{ self, connection }, retry_policy)) {
+            std.log.info("Connection fd={} completed successfully", .{connection.socket.handle});
+            _ = self.metrics.recordSuccess();
+        } else |err| {
             std.log.err("Connection fd={} failed with {}", .{ connection.socket.handle, err });
-        };
-
-        std.log.info("Connection fd={} completed successfully", .{connection.socket.handle});
+            _ = self.metrics.recordError();
+        }
     }
 
     /// Handle client connection: SSL handshake, HTTP/2 setup, DNS processing
     fn handleConnection(self: *Server, connection: net.Stream) !void {
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
+
         const allocator = arena.allocator();
 
         var request_ctx = try http.RequestContext.init(connection, allocator, self.ctx);
