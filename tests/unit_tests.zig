@@ -1,6 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const server = @import("server");
+const prom = @import("metrics");
 
 const test_cert_path = "/tmp/test_cert.pem";
 const test_key_path = "/tmp/test_key.pem";
@@ -158,7 +159,8 @@ test "Server init: invalid certificate path" {
     config.ssl.cert_file = try testing.allocator.dupe(u8, "/nonexistent/cert.pem");
     config.ssl.key_file = try testing.allocator.dupe(u8, "/nonexistent/key.pem");
 
-    const result = server.Server.init(std.testing.io, testing.allocator, config);
+    var metrics = prom.Metrics.init();
+    const result = server.Server.init(std.testing.io, testing.allocator, config, &metrics);
     try testing.expectError(error.CertLoadFailed, result);
 }
 

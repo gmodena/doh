@@ -6,7 +6,7 @@ const http = @import("http.zig");
 const dns = @import("dns.zig");
 const c = @import("cimports.zig").c;
 
-const prom = @import("metrics.zig");
+const prom = @import("metrics");
 
 const Allocator = std.mem.Allocator;
 
