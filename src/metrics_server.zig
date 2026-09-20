@@ -1,4 +1,4 @@
-const prom = @import("metrics.zig");
+const prom = @import("metrics");
 const std = @import("std");
 const doh = @import("config.zig");
 

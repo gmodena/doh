@@ -22,6 +22,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const metrics_module = b.addModule("metrics", .{
+        .root_source_file = b.path("src/metrics.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Create the main executable module
     const exe_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -29,6 +35,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     exe_module.addImport("error", error_module);
+    exe_module.addImport("metrics", metrics_module);
     exe_module.linkSystemLibrary("c", .{});
     exe_module.linkSystemLibrary("wolfssl", .{});
     exe_module.linkSystemLibrary("nghttp2", .{});
@@ -71,6 +78,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     lib_unit_tests_module.addImport("error", error_module);
+    lib_unit_tests_module.addImport("metrics", metrics_module);
     lib_unit_tests_module.linkSystemLibrary("c", .{});
     lib_unit_tests_module.linkSystemLibrary("wolfssl", .{});
     lib_unit_tests_module.linkSystemLibrary("nghttp2", .{});
@@ -88,6 +96,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     server_module.addImport("error", error_module);
+    server_module.addImport("metrics", metrics_module);
 
     // Add comprehensive test suite
     const doh_tests_module = b.createModule(.{
@@ -97,6 +106,7 @@ pub fn build(b: *std.Build) void {
     });
     doh_tests_module.addImport("server", server_module);
     doh_tests_module.addImport("error", error_module);
+    doh_tests_module.addImport("metrics", metrics_module);
     doh_tests_module.linkSystemLibrary("c", .{});
     doh_tests_module.linkSystemLibrary("wolfssl", .{});
     doh_tests_module.linkSystemLibrary("nghttp2", .{});
@@ -114,6 +124,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     unit_tests_module.addImport("server", server_module);
+    unit_tests_module.addImport("metrics", metrics_module);
     unit_tests_module.linkSystemLibrary("c", .{});
     unit_tests_module.linkSystemLibrary("wolfssl", .{});
     unit_tests_module.linkSystemLibrary("nghttp2", .{});

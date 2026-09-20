@@ -1,7 +1,7 @@
 const std = @import("std");
 const server = @import("server.zig");
 const config = @import("config.zig");
-const prom = @import("metrics.zig");
+const prom = @import("metrics");
 const metrics_server = @import("metrics_server.zig");
 
 const Config = config.Config;
